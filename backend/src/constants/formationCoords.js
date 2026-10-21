@@ -1,0 +1,97 @@
+/**
+ * 포메이션별 11개 슬롯의 기본 좌표. 구장은 가로 0~100, 세로 0~100 백분율 좌표계이며
+ * 홈팀은 좌->우 공격 기준입니다. 원정팀은 getFormationSlots(code, 'AWAY') 로 x 를 100 - x 로 대칭 변환합니다.
+ */
+
+/**
+ * @param {'GK'|'DF'|'MF'|'FW'} role
+ * @param {string} label
+ * @param {number} baseX
+ * @param {number} baseY
+ * @returns {{role:string, label:string, baseX:number, baseY:number}}
+ */
+const slot = (role, label, baseX, baseY) => ({ role, label, baseX, baseY });
+
+/**
+ * 슬롯 배열에 slotIndex(0~10)를 부여하고 불변 객체로 만듭니다.
+ * @param {Array<{role:string, label:string, baseX:number, baseY:number}>} slots
+ * @returns {ReadonlyArray<{slotIndex:number, role:string, label:string, baseX:number, baseY:number}>}
+ */
+const withIndex = (slots) => Object.freeze(slots.map((s, slotIndex) => Object.freeze({ slotIndex, ...s })));
+
+const GOALKEEPER = slot('GK', 'GK', 8, 50);
+const BACK_FOUR = [
+  slot('DF', 'LB', 25, 15),
+  slot('DF', 'LCB', 22, 38),
+  slot('DF', 'RCB', 22, 62),
+  slot('DF', 'RB', 25, 85),
+];
+
+export const FORMATIONS = Object.freeze({
+  '4-3-3': withIndex([
+    GOALKEEPER,
+    ...BACK_FOUR,
+    slot('MF', 'LCM', 48, 25),
+    slot('MF', 'CM', 45, 50),
+    slot('MF', 'RCM', 48, 75),
+    slot('FW', 'LW', 75, 18),
+    slot('FW', 'ST', 80, 50),
+    slot('FW', 'RW', 75, 82),
+  ]),
+  '4-4-2': withIndex([
+    GOALKEEPER,
+    ...BACK_FOUR,
+    slot('MF', 'LM', 50, 15),
+    slot('MF', 'LCM', 48, 38),
+    slot('MF', 'RCM', 48, 62),
+    slot('MF', 'RM', 50, 85),
+    slot('FW', 'LST', 78, 35),
+    slot('FW', 'RST', 78, 65),
+  ]),
+  '4-2-3-1': withIndex([
+    GOALKEEPER,
+    ...BACK_FOUR,
+    slot('MF', 'LDM', 38, 35),
+    slot('MF', 'RDM', 38, 65),
+    slot('MF', 'LAM', 62, 20),
+    slot('MF', 'CAM', 60, 50),
+    slot('MF', 'RAM', 62, 80),
+    slot('FW', 'ST', 82, 50),
+  ]),
+  '3-5-2': withIndex([
+    GOALKEEPER,
+    slot('DF', 'LCB', 22, 25),
+    slot('DF', 'CB', 20, 50),
+    slot('DF', 'RCB', 22, 75),
+    slot('MF', 'LWB', 50, 10),
+    slot('MF', 'LCM', 46, 32),
+    slot('MF', 'CM', 42, 50),
+    slot('MF', 'RCM', 46, 68),
+    slot('MF', 'RWB', 50, 90),
+    slot('FW', 'LST', 78, 35),
+    slot('FW', 'RST', 78, 65),
+  ]),
+});
+
+export const FORMATION_CODES = Object.freeze(Object.keys(FORMATIONS));
+export const DEFAULT_FORMATION = '4-3-3';
+
+/**
+ * 유효한 포메이션 코드인지 검사합니다.
+ * @param {unknown} code
+ * @returns {boolean}
+ */
+export function isValidFormation(code) {
+  return typeof code === 'string' && Object.prototype.hasOwnProperty.call(FORMATIONS, code);
+}
+
+/**
+ * 포메이션의 11개 슬롯을 팀 방향에 맞춰 반환합니다. (원정팀은 baseX 를 100 - x 로 대칭)
+ * @param {string} code 포메이션 코드
+ * @param {'HOME'|'AWAY'} [side='HOME']
+ * @returns {Array<{slotIndex:number, role:string, label:string, baseX:number, baseY:number}>}
+ */
+export function getFormationSlots(code, side = 'HOME') {
+  const slots = FORMATIONS[isValidFormation(code) ? code : DEFAULT_FORMATION];
+  return slots.map((s) => ({ ...s, baseX: side === 'AWAY' ? 100 - s.baseX : s.baseX }));
+}

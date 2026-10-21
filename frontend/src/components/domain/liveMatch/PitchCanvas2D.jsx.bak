@@ -1,0 +1,1038 @@
+﻿import { useEffect, useRef } from 'react';
+import useLiveMatchStore from '../../../store/useLiveMatchStore.js';
+import { FAMILIARITY_META, getInstructionDef, getTacticEffect } from '../../../constants/tacticsConfig.js';
+
+const WIDTH = 900;
+const HEIGHT = 540;
+const MARGIN = 28;
+const GOAL_X = { HOME: 98, AWAY: 2 };
+const CELEBRATION_MS = 2000;
+
+/**
+ * @param {number} v
+ * @param {number} min
+ * @param {number} max
+ * @returns {number} min~max 濡??쒗븳??媛?
+ */
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+/**
+ * ?쇱튂 % 醫뚰몴(0~100)瑜?罹붾쾭???쎌? X 濡?蹂?섑빀?덈떎.
+ * @param {number} x
+ * @returns {number}
+ */
+function toPx(x) {
+  return MARGIN + (x / 100) * (WIDTH - MARGIN * 2);
+}
+
+/**
+ * ?쇱튂 % 醫뚰몴(0~100)瑜?罹붾쾭???쎌? Y 濡?蹂?섑빀?덈떎.
+ * @param {number} y
+ * @returns {number}
+ */
+function toPy(y) {
+  return MARGIN + (y / 100) * (HEIGHT - MARGIN * 2);
+}
+
+/**
+ * ?????ъ씠 嫄곕━(% 醫뚰몴 湲곗?)
+ * @param {{x:number, y:number}} a
+ * @param {{x:number, y:number}} b
+ * @returns {number}
+ */
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * 諛곗뿴?먯꽌 臾댁옉???먯냼瑜?諛섑솚?⑸땲??
+ * @template T
+ * @param {T[]} arr
+ * @returns {T|null}
+ */
+function randomPick(arr) {
+  return arr.length ? arr[Math.floor(Math.random() * arr.length)] : null;
+}
+
+/**
+ * 罹붾쾭???좊땲硫붿씠???붿쭊 ?곹깭(?좎닔 22紐?Agent, 怨? 怨??몃━癒몃땲)瑜??앹꽦?⑸땲??
+ * @returns {Object}
+ */
+function createEngine() {
+  return {
+    agents: new Map(),
+    ball: {
+      x: 50,
+      y: 50,
+      targetX: 50,
+      targetY: 50,
+      ownerId: null,
+      isShot: false,
+      speed: 0.18,
+      mode: 'idle',
+      passTargetId: null,
+      queue: [],
+      dwell: 0,
+      shotOutcome: null,
+      shotTeam: null,
+      shooterName: null,
+    },
+    lastSeq: -1,
+    celebration: null,
+    pending: [],
+    attackTeam: 'HOME',
+    initialized: false,
+  };
+}
+
+/**
+ * 援ъ옣??洹몃┰?덈떎: ?붾뵒 ?몃줈 ?ㅽ듃?쇱씠?? ?곗튂?쇱씤, ?섑봽?쇱씤, ?쇳꽣?쒗겢, ?묒そ ?섎꼸??諛뺤뒪/怨⑥뿉?대━??怨⑤?.
+ * ?ㅼ젣 援ъ옣 洹쒓꺽(105m x 68m)??罹붾쾭??鍮꾩쑉??留욎떠 ?섏궛?⑸땲??
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} width 罹붾쾭???덈퉬 (900)
+ * @param {number} height 罹붾쾭???믪씠 (540)
+ * @returns {void}
+ */
+export function drawPitch(ctx, width, height) {
+  const pw = width - MARGIN * 2;
+  const ph = height - MARGIN * 2;
+  const mx = pw / 105;
+  const my = ph / 68;
+  const cx = MARGIN + pw / 2;
+  const cy = MARGIN + ph / 2;
+
+  ctx.fillStyle = '#1b5e20';
+  ctx.fillRect(0, 0, width, height);
+
+  const stripes = 14;
+  const stripeWidth = pw / stripes;
+  for (let i = 0; i < stripes; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#2e7d32' : '#3b9140';
+    ctx.fillRect(MARGIN + i * stripeWidth, MARGIN, stripeWidth + 0.5, ph);
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(MARGIN, MARGIN, pw, ph);
+
+  ctx.beginPath();
+  ctx.moveTo(cx, MARGIN);
+  ctx.lineTo(cx, MARGIN + ph);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, 9.15 * mx, 9.15 * my, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  const boxDepth = 16.5 * mx;
+  const boxHeight = 40.32 * my;
+  const sixDepth = 5.5 * mx;
+  const sixHeight = 18.32 * my;
+  const arcAngle = Math.acos((16.5 - 11) / 9.15);
+
+  for (const side of ['left', 'right']) {
+    const isLeft = side === 'left';
+    const lineX = isLeft ? MARGIN : MARGIN + pw;
+    const boxX = isLeft ? lineX : lineX - boxDepth;
+    const sixX = isLeft ? lineX : lineX - sixDepth;
+    const spotX = isLeft ? lineX + 11 * mx : lineX - 11 * mx;
+
+    ctx.strokeRect(boxX, cy - boxHeight / 2, boxDepth, boxHeight);
+    ctx.strokeRect(sixX, cy - sixHeight / 2, sixDepth, sixHeight);
+
+    ctx.beginPath();
+    ctx.arc(spotX, cy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    if (isLeft) ctx.ellipse(spotX, cy, 9.15 * mx, 9.15 * my, 0, -arcAngle, arcAngle);
+    else ctx.ellipse(spotX, cy, 9.15 * mx, 9.15 * my, 0, Math.PI - arcAngle, Math.PI + arcAngle);
+    ctx.stroke();
+
+    const goalDepth = 2.4 * mx;
+    const goalHeight = 7.32 * my;
+    const goalX = isLeft ? lineX - goalDepth : lineX;
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(goalX, cy - goalHeight / 2, goalDepth, goalHeight);
+    ctx.strokeRect(goalX, cy - goalHeight / 2, goalDepth, goalHeight);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  }
+
+  for (const [cornerX, cornerY, start] of [
+    [MARGIN, MARGIN, 0],
+    [MARGIN + pw, MARGIN, Math.PI / 2],
+    [MARGIN + pw, MARGIN + ph, Math.PI],
+    [MARGIN, MARGIN + ph, Math.PI * 1.5],
+  ]) {
+    ctx.beginPath();
+    ctx.ellipse(cornerX, cornerY, mx, my, 0, start, start + Math.PI / 2);
+    ctx.stroke();
+  }
+}
+
+/**
+ * ?ㅽ넗?댁쓽 ?좎닔 ?곹깭(22紐?瑜?罹붾쾭??Agent 濡??숆린?뷀빀?덈떎. ?좉퇋 ?좎닔??諛곗튂 醫뚰몴???ъ엯(+IN ?쒖떆)?섍퀬,
+ * 援먯껜 ?꾩썐???좎닔???쒓굅?섎ŉ, ?댁옣 ?좎닔??isSentOff 濡??쒖떆?⑸땲??
+ * @param {Object} engine
+ * @param {Object} state ?쇱씠釉??ㅽ넗???곹깭
+ * @param {number} now
+ * @returns {void}
+ */
+function syncAgents(engine, state, now) {
+  const seen = new Set();
+  for (const team of [state.homeTeam, state.awayTeam]) {
+    for (const p of team.starters) {
+      seen.add(p.id);
+      let agent = engine.agents.get(p.id);
+      if (!agent) {
+        agent = {
+          id: p.id,
+          name: p.name,
+          backNumber: p.backNumber,
+          team: team.side,
+          role: p.slotRoleGroup,
+          slotRoleCode: p.slotRoleCode,
+          instruction: p.instruction,
+          familiarity: p.familiarity,
+          baseX: p.baseX,
+          baseY: p.baseY,
+          x: p.baseX,
+          y: p.baseY,
+          targetX: p.baseX,
+          targetY: p.baseY,
+          vx: 0,
+          vy: 0,
+          stamina: p.currentStamina,
+          speedStat: p.effectiveStats.speed * p.familiarityMultiplier,
+          hasBall: false,
+          yellowCards: p.yellowCards,
+          isSentOff: p.isSentOff,
+          flash: engine.initialized ? { type: 'SUB', until: now + 1800 } : null,
+          phase: Math.random() * Math.PI * 2,
+        };
+        engine.agents.set(p.id, agent);
+      }
+      agent.name = p.name;
+      agent.backNumber = p.backNumber;
+      agent.role = p.slotRoleGroup;
+      agent.slotRoleCode = p.slotRoleCode;
+      agent.instruction = p.instruction;
+      agent.familiarity = p.familiarity;
+      agent.baseX = p.baseX;
+      agent.baseY = p.baseY;
+      agent.stamina = p.currentStamina;
+      agent.speedStat = p.effectiveStats.speed * p.familiarityMultiplier;
+      agent.yellowCards = p.yellowCards;
+      agent.isSentOff = p.isSentOff;
+    }
+  }
+  for (const id of [...engine.agents.keys()]) {
+    if (!seen.has(id)) {
+      engine.agents.delete(id);
+      if (engine.ball.ownerId === id) {
+        engine.ball.ownerId = null;
+        engine.ball.mode = 'idle';
+      }
+    }
+  }
+  engine.initialized = true;
+}
+
+/**
+ * ?덊똿 ?곗텧(?湲?以묒씠嫄곕굹 鍮꾪뻾 以??대굹 怨??몃━癒몃땲媛 吏꾪뻾 以묒씠?????≪뀡 ?곸슜??誘몃쨪???섎뒗吏 ?먮떒?⑸땲??
+ * @param {Object} engine
+ * @returns {boolean}
+ */
+function isActionBlocked(engine) {
+  return (
+    Boolean(engine.celebration) ||
+    engine.ball.mode === 'shot' ||
+    engine.ball.queue.some((step) => step.type === 'shot')
+  );
+}
+
+/**
+ * ?????≪뀡???곸슜?섍굅??李⑤떒 ?곹깭媛 ?꾨땺 ??, 蹂대쪟 紐⑸줉???볦뒿?덈떎.
+ * @param {Object} engine
+ * @param {Object} action
+ * @param {number} now
+ * @returns {void}
+ */
+function submitAction(engine, action, now) {
+  if (!isActionBlocked(engine) && engine.pending.length === 0) {
+    applyAction(engine, action, now);
+    return;
+  }
+  engine.pending.push(action);
+  if (engine.pending.length > 60) engine.pending.shift();
+}
+
+/**
+ * 李⑤떒???由щ㈃ 蹂대쪟???≪뀡???곸슜?⑸땲?? ?앹젏(GOAL) ?≪뀡???덉쑝硫??곗꽑 ?곸슜?섍퀬, ?놁쑝硫?媛??理쒓렐 ?≪뀡留??곸슜?⑸땲??
+ * @param {Object} engine
+ * @param {number} now
+ * @returns {void}
+ */
+function drainPending(engine, now) {
+  if (engine.pending.length === 0 || isActionBlocked(engine)) return;
+  const goalIndex = engine.pending.findIndex((a) => a.eventType === 'GOAL');
+  const pickIndex = goalIndex >= 0 ? goalIndex : engine.pending.length - 1;
+  const action = engine.pending[pickIndex];
+  engine.pending = engine.pending.slice(pickIndex + 1);
+  applyAction(engine, action, now);
+}
+
+/**
+ * ???≪뀡(currentTickAction)??怨??대룞 ???⑥뒪 -> ?⑥뒪 -> ?덊똿)? ?좎닔 ?쒖떆(移대뱶/?뚯슱/援먯껜)濡?蹂?섑빀?덈떎.
+ * @param {Object} engine
+ * @param {Object} action
+ * @param {number} now
+ * @returns {void}
+ */
+function applyAction(engine, action, now) {
+  const { ball, agents } = engine;
+
+  if (action.eventType === 'SUB') {
+    const incoming = agents.get(action.subInId);
+    if (incoming) incoming.flash = { type: 'SUB', until: now + 1800 };
+    return;
+  }
+
+  if (action.eventType === 'KICKOFF') {
+    ball.mode = 'idle';
+    ball.ownerId = null;
+    ball.isShot = false;
+    ball.x = 50;
+    ball.y = 50;
+    ball.targetX = 50;
+    ball.targetY = 50;
+  }
+
+  const queue = [];
+  const dir = action.attackingTeam === 'HOME' ? 1 : -1;
+  const holder = ball.mode === 'carried' ? agents.get(ball.ownerId) : ball.mode === 'pass' ? agents.get(ball.passTargetId) : null;
+  // 怨듦꺽 3遺꾩쓽 1 吏??뿉???대? 怨듭쓣 媛吏??숇즺媛 ?덉쑝硫?怨듭쓣 ?ㅻ줈 ?뚮━吏 ?딄퀬 洹??좎닔媛 ?꾩쭊 ?뚮젅?대? ?댁뼱媛묐땲??
+  const holderInThird = Boolean(holder) && holder.team === action.attackingTeam && !holder.isSentOff && (dir > 0 ? holder.x > 65 : holder.x < 35);
+  const isForward = (agent) => (agent.x - holder.x) * dir >= -3;
+
+  const carrier = action.ballCarrierId ? agents.get(action.ballCarrierId) : null;
+  if (carrier && !carrier.isSentOff) {
+    const alreadyHolding = ball.ownerId === carrier.id || (ball.mode === 'pass' && ball.passTargetId === carrier.id);
+    if (!alreadyHolding && !(holderInThird && !isForward(carrier))) queue.push({ type: 'pass', toId: carrier.id });
+    engine.attackTeam = action.attackingTeam;
+  }
+
+  const target = action.passTargetId ? agents.get(action.passTargetId) : null;
+  if (target && !target.isSentOff && target.id !== action.ballCarrierId && !(holderInThird && !isForward(target))) {
+    queue.push({ type: 'pass', toId: target.id });
+  }
+
+  if (action.eventType === 'SHOT' || action.eventType === 'GOAL') {
+    const shooter = agents.get(action.shooterId);
+    const lastPassId = queue.length ? queue[queue.length - 1].toId : holder?.id;
+    if (holderInThird && shooter && shooter.id !== lastPassId && !isForward(shooter)) {
+      // ?덊꽣媛 ?ㅼ뿉 ?덉쑝硫?諛깊뙣??????꾩옱 怨?蹂댁쑀?먭? 吏곸젒 ?덊똿?⑸땲?? (?앹젏???쒖떆???쒕??덉씠??寃곌낵 洹몃?濡?
+      queue.length = 0;
+      queue.push({ type: 'shot', shooterId: holder.id, displayName: action.shooterName, outcome: action.shotOutcome });
+    } else {
+      queue.push({ type: 'shot', shooterId: action.shooterId, displayName: action.shooterName, outcome: action.shotOutcome });
+    }
+  }
+
+  if (action.eventType === 'CARD' && action.cardPlayerId) {
+    const booked = agents.get(action.cardPlayerId);
+    if (booked) booked.flash = { type: action.cardType, until: now + 2200 };
+  } else if (action.eventType === 'FOUL' && action.foulerId) {
+    const fouler = agents.get(action.foulerId);
+    if (fouler) fouler.flash = { type: 'FOUL', until: now + 1200 };
+  }
+
+  ball.queue = queue;
+  if (queue.length > 0 && ball.mode === 'carried') ball.dwell = Math.min(ball.dwell, 3);
+}
+
+/**
+ * 怨듭쓽 ?ㅼ쓬 ?됰룞(?⑥뒪 ?먮뒗 ?덊똿)???쒖옉?⑸땲??
+ * @param {Object} engine
+ * @param {{type:'pass', toId:string}|{type:'shot', shooterId:string, outcome:string}} step
+ * @returns {void}
+ */
+function startStep(engine, step) {
+  const { ball, agents } = engine;
+  if (step.type === 'pass') {
+    ball.mode = 'pass';
+    ball.passTargetId = step.toId;
+    ball.ownerId = null;
+    ball.isShot = false;
+    return;
+  }
+
+  const shooter = agents.get(step.shooterId);
+  if (!shooter || shooter.isSentOff) {
+    ball.mode = 'idle';
+    ball.queue = [];
+    return;
+  }
+  const attackSide = shooter.team;
+  const defendSide = attackSide === 'HOME' ? 'AWAY' : 'HOME';
+  const goalX = GOAL_X[attackSide];
+  ball.mode = 'shot';
+  ball.isShot = true;
+  ball.ownerId = null;
+  ball.shotTeam = attackSide;
+  ball.shooterName = step.displayName || shooter.name;
+  ball.shotOutcome = step.outcome;
+
+  if (step.outcome === 'GOAL') {
+    ball.targetX = goalX;
+    ball.targetY = 50 + (Math.random() * 12 - 6);
+  } else if (step.outcome === 'SAVED') {
+    const keeper = [...agents.values()].find((a) => a.team === defendSide && a.role === 'GK' && !a.isSentOff);
+    ball.targetX = keeper ? keeper.x : goalX;
+    ball.targetY = keeper ? keeper.y : 50;
+  } else {
+    ball.targetX = attackSide === 'HOME' ? 102 : -2;
+    ball.targetY = 50 + (Math.random() < 0.5 ? -1 : 1) * (10 + Math.random() * 6);
+  }
+}
+
+/**
+ * 怨??대룞 ?먯쓽 ?ㅼ쓬 ?④퀎瑜??쒖옉?⑸땲?? 怨듦꺽 3遺꾩쓽 1 吏????X>65 / ?먯젙 X<35)?먯꽌 蹂댁쑀?먭? ?ㅼそ ?숇즺?먭쾶 二쇰뒗 ?⑥뒪 ?④퀎??嫄대꼫?곷땲??
+ * @param {Object} engine
+ * @returns {boolean} ?④퀎瑜??쒖옉?덉쑝硫?true (?먭? 鍮꾩뿀嫄곕굹 紐⑤몢 嫄대꼫?곗뿀?쇰㈃ false)
+ */
+function startNextStep(engine) {
+  const { ball, agents } = engine;
+  const owner = ball.ownerId ? agents.get(ball.ownerId) : null;
+  while (ball.queue.length > 0) {
+    const step = ball.queue.shift();
+    if (step.type === 'pass') {
+      const to = agents.get(step.toId);
+      if (!to || to.isSentOff) continue;
+      if (owner && to.team === owner.team) {
+        const dir = owner.team === 'HOME' ? 1 : -1;
+        const inThird = dir > 0 ? owner.x > 65 : owner.x < 35;
+        if (inThird && (to.x - owner.x) * dir < -3) continue;
+      }
+    }
+    startStep(engine, step);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * ?덊똿 議??먯젙: ?덉? X??2, ?먯젙? X??8 ?대㈃ 怨⑤Ц ???덊똿 議댁엯?덈떎.
+ * @param {Object} owner 怨?蹂댁쑀 ?좎닔 Agent
+ * @returns {boolean}
+ */
+function isInShootingZone(owner) {
+  return owner.team === 'HOME' ? owner.x >= 72 : owner.x <= 28;
+}
+
+/**
+ * 怨?蹂댁쑀????吏꾪뻾 諛⑺뼢 18 ?대궡, 醫뚯슦 짹12)???곷? ?꾨뱶 ?뚮젅?댁뼱媛 ?녿뒗吏 ?뺤씤?⑸땲?? (?덊똿/?뚰뙆 湲몄씠 ?대젮 ?덈뒗吏)
+ * @param {Object} engine
+ * @param {Object} owner
+ * @returns {boolean}
+ */
+function hasClearPath(engine, owner) {
+  const dir = owner.team === 'HOME' ? 1 : -1;
+  return ![...engine.agents.values()].some(
+    (a) => a.team !== owner.team && !a.isSentOff && a.role !== 'GK' && (a.x - owner.x) * dir >= 0 && (a.x - owner.x) * dir <= 18 && Math.abs(a.y - owner.y) <= 12
+  );
+}
+
+/**
+ * 媛??醫뗭? ?⑥뒪 ??곸쓣 ?먯닔濡?怨좊쫭?덈떎.
+ * ?먯닔 = ?꾩쭊 嫄곕━(forwardProgress) - 嫄곕━ ?⑤꼸??+ 留덊겕 ???뱁븿(二쇰? 10 ?대궡 ?곷? ?놁쓬) +50 + ?⑥뒪 諛⑹떇 蹂댁젙 + ?쎄컙??臾댁옉??
+ * 怨듦꺽 3遺꾩쓽 1 吏????X>65 / ?먯젙 X<35)?먯꽌??諛깊뙣?ㅺ? -999 濡?諛곗젣?섏뼱 ?덈? ?좏깮?섏? ?딆뒿?덈떎.
+ * @param {Object} engine
+ * @param {Object} owner 怨?蹂댁쑀 ?좎닔 Agent
+ * @param {string} passingStyle SHORT | MIXED | DIRECT_LONG
+ * @returns {Object|null} ?좏깮???숇즺 Agent (?좏슚????곸씠 ?놁쑝硫?null)
+ */
+function selectBestPassTarget(engine, owner, passingStyle) {
+  const dir = owner.team === 'HOME' ? 1 : -1;
+  const agents = [...engine.agents.values()];
+  const mates = agents.filter((a) => a.team === owner.team && a.id !== owner.id && !a.isSentOff && a.role !== 'GK');
+  const opponents = agents.filter((a) => a.team !== owner.team && !a.isSentOff);
+  const inAttackingThird = dir > 0 ? owner.x > 65 : owner.x < 35;
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const mate of mates) {
+    const dist = distance(mate, owner);
+    if (dist < 4) continue;
+    const forwardProgress = (mate.x - owner.x) * dir;
+    let score = forwardProgress - Math.max(0, dist - 40) * 1.5;
+    if (!opponents.some((o) => distance(o, mate) < 10)) score += 50;
+    if (inAttackingThird && forwardProgress < 0) score -= 999;
+    if (passingStyle === 'SHORT') score += Math.max(0, 30 - dist) * 0.8 - Math.max(0, dist - 34) * 2;
+    else if (passingStyle === 'DIRECT_LONG') score += (mate.role === 'FW' ? 20 : 0) + (dist > 25 ? 10 : 0);
+    score += Math.random() * 8;
+    if (score > bestScore) {
+      bestScore = score;
+      best = mate;
+    }
+  }
+  return bestScore > -500 ? best : null;
+}
+
+/**
+ * 怨?蹂댁쑀?먯쓽 ?ㅼ쓬 ?됰룞??寃곗젙?⑸땲?? (?곗텧 ?꾩슜: ?앹젏/?덊똿 ?듦퀎?????쒕??덉씠?섏씠 寃곗젙)
+ * - ?덊똿 議???X??2, ?먯젙 X??8) ?닿굅???욎씠 ?대젮 ?덉쑝硫???X??2 + 湲??대┝) ?⑥뒪?섏? ?딄퀬 怨⑤Ц?쇰줈 ?쒕━釉뷀빀?덈떎.
+ * - 怨⑤Ц源뚯? 24 ?대궡濡??묎렐?섎㈃ ?곗텧???덊똿(?좊갑/鍮쀫굹媛????⑸땲?? (荑⑤떎???곸슜)
+ * - 洹??몄뿉??selectBestPassTarget ?쇰줈 ?꾩쭊 ?⑥뒪瑜??⑸땲??
+ * @param {Object} engine
+ * @param {Object} owner 怨?蹂댁쑀 ?좎닔 Agent
+ * @param {string} passingStyle ? ?⑥뒪 諛⑹떇
+ * @param {number} now
+ * @returns {void}
+ */
+function startCosmeticPass(engine, owner, passingStyle, now) {
+  const dir = owner.team === 'HOME' ? 1 : -1;
+  const inZone = isInShootingZone(owner);
+  const open = (dir > 0 ? owner.x >= 62 : owner.x <= 38) && hasClearPath(engine, owner);
+
+  if (inZone || open) {
+    const goalDistance = Math.hypot(GOAL_X[owner.team] - owner.x, 50 - owner.y);
+    const closeToByline = Math.abs(GOAL_X[owner.team] - owner.x) <= 14;
+    if ((goalDistance <= 24 || closeToByline) && now >= (engine.shotCooldownUntil || 0)) {
+      engine.shotCooldownUntil = now + 2500;
+      startStep(engine, { type: 'shot', shooterId: owner.id, outcome: Math.random() < 0.55 ? 'SAVED' : 'MISS' });
+      return;
+    }
+    engine.ball.dwell = 6;
+    return;
+  }
+
+  const target = selectBestPassTarget(engine, owner, passingStyle);
+  if (target) startStep(engine, { type: 'pass', toId: target.id });
+  else engine.ball.dwell = 8;
+}
+
+/**
+ * 怨??몃━癒몃땲 醫낅즺瑜?泥섎━?⑸땲?? (?쇱떆?뺤? 以묒뿉???ㅼ떆媛?湲곗??쇰줈 醫낅즺) 醫낅즺?섎㈃ 怨듭쓣 ?쇳꽣?쒗겢濡??섎룎由ш퀬
+ * ?ㅼ젏 ? ?μ삤?꾨줈 ?꾪솚???? 蹂대쪟???≪뀡???곸슜?⑸땲??
+ * @param {Object} engine
+ * @param {number} now
+ * @returns {void}
+ */
+function updateCelebration(engine, now) {
+  if (!engine.celebration || now < engine.celebration.until) return;
+  const { ball } = engine;
+  engine.attackTeam = engine.celebration.team === 'HOME' ? 'AWAY' : 'HOME';
+  engine.celebration = null;
+  ball.mode = 'idle';
+  ball.ownerId = null;
+  ball.isShot = false;
+  ball.queue = [];
+  ball.x = 50;
+  ball.y = 50;
+  ball.targetX = 50;
+  ball.targetY = 50;
+}
+
+/**
+ * 怨듭쓣 ?꾨젅???⑥쐞濡?媛깆떊?⑸땲?? 蹂댁쑀???곕씪媛湲?0.18) / ?⑥뒪(0.22 * 諛곗냽) / ?덊똿 / 怨??몃━癒몃땲.
+ * @param {Object} engine
+ * @param {Object} state
+ * @param {number} dtScale 60fps 湲곗? ?꾨젅??諛곗닔
+ * @param {number} now
+ * @returns {void}
+ */
+function updateBall(engine, state, dtScale, now) {
+  const { ball, agents } = engine;
+  const speed = state.playbackSpeed;
+  const rateOf = (r) => 1 - Math.pow(1 - Math.min(r, 0.9), dtScale);
+  const follow = (tx, ty, rate) => {
+    ball.x += (tx - ball.x) * rate;
+    ball.y += (ty - ball.y) * rate;
+  };
+
+  if (engine.celebration) {
+    follow(ball.targetX, ball.targetY, rateOf(0.4));
+    return;
+  }
+
+  if (ball.mode === 'carried') {
+    const owner = ball.ownerId ? agents.get(ball.ownerId) : null;
+    if (!owner || owner.isSentOff) {
+      const heir = [...agents.values()]
+        .filter((a) => a.team === engine.attackTeam && !a.isSentOff && a.role !== 'GK')
+        .sort((a, b) => distance(a, ball) - distance(b, ball))[0];
+      if (heir) {
+        ball.ownerId = heir.id;
+      } else {
+        ball.mode = 'idle';
+        ball.ownerId = null;
+      }
+      return;
+    }
+    const dir = owner.team === 'HOME' ? 1 : -1;
+    ball.targetX = owner.x + dir * 1.3;
+    ball.targetY = owner.y;
+    follow(ball.targetX, ball.targetY, rateOf(ball.speed * speed));
+    ball.dwell -= dtScale * speed;
+    if (ball.dwell <= 0) {
+      if (!startNextStep(engine)) {
+        startCosmeticPass(engine, owner, (owner.team === 'HOME' ? state.homeTeam : state.awayTeam).tactics.passingStyle, now);
+      }
+    }
+    return;
+  }
+
+  if (ball.mode === 'pass') {
+    const target = ball.passTargetId ? agents.get(ball.passTargetId) : null;
+    if (!target || target.isSentOff) {
+      ball.mode = 'idle';
+      ball.queue = [];
+      return;
+    }
+    ball.targetX = target.x;
+    ball.targetY = target.y;
+    follow(ball.targetX, ball.targetY, rateOf(0.22 * speed));
+    if (distance(ball, target) < 1.4) {
+      ball.mode = 'carried';
+      ball.ownerId = target.id;
+      engine.attackTeam = target.team;
+      const holdTeam = target.team === 'HOME' ? state.homeTeam : state.awayTeam;
+      const styleMul = holdTeam.tactics.passingStyle === 'SHORT' ? 0.75 : holdTeam.tactics.passingStyle === 'DIRECT_LONG' ? 1.3 : 1;
+      const tempoMul = 1 / getTacticEffect(holdTeam.tactics, 'tempo').canvasSpeed;
+      ball.dwell = ball.queue.length > 0 ? 5 : (22 + Math.random() * 24) * styleMul * tempoMul;
+    }
+    return;
+  }
+
+  if (ball.mode === 'shot') {
+    follow(ball.targetX, ball.targetY, rateOf(0.4 * speed));
+    if (distance(ball, { x: ball.targetX, y: ball.targetY }) < 1.2) {
+      ball.isShot = false;
+      if (ball.shotOutcome === 'GOAL') {
+        ball.mode = 'static';
+        ball.queue = [];
+        engine.celebration = {
+          startedAt: now,
+          until: now + CELEBRATION_MS,
+          team: ball.shotTeam,
+          teamName: ball.shotTeam === 'HOME' ? state.homeTeam.name : state.awayTeam.name,
+          scorer: ball.shooterName,
+        };
+      } else {
+        const defendSide = ball.shotTeam === 'HOME' ? 'AWAY' : 'HOME';
+        const keeper = [...agents.values()].find((a) => a.team === defendSide && a.role === 'GK' && !a.isSentOff);
+        ball.queue = [];
+        if (keeper) {
+          ball.mode = 'pass';
+          ball.passTargetId = keeper.id;
+          engine.attackTeam = defendSide;
+        } else {
+          ball.mode = 'idle';
+        }
+      }
+    }
+    return;
+  }
+
+  if (ball.mode === 'idle' && ball.queue.length > 0) startStep(engine, ball.queue.shift());
+}
+
+/**
+ * ?좎닔 22紐낆쓽 ?대룞???꾨젅???⑥쐞濡?媛깆떊?⑸땲??
+ * ?꾩닠 紐⑺몴?? tacticalX = baseX + (ball.x - 50) * ballShift(湲곕낯 0.25) + ?깊뼢 ?쇱씤 ?ㅽ봽??(+ ?섎퉬吏꾩? ?섎퉬 ?쇱씤 ?ㅽ봽??,
+ * tacticalY = baseY + (ball.y - 50) * 0.15.
+ * 怨?蹂댁쑀?먮뒗 ?곷? 怨⑤?(HOME X=92 / AWAY X=8) 諛⑺뼢?쇰줈 ?쒕━釉? ?섎퉬?? ?뺣컯 媛뺣룄(0/1/3紐?留뚰겮 怨듦낵 媛源뚯슫 ?좎닔媛 ?뺣컯?섍퀬
+ * (PRESS_FORWARD 怨듦꺽??STEP_UP ?쇳꽣諛?異붽? 媛??, 怨듦꺽? FW ??怨⑤? 諛⑺뼢?쇰줈 移⑦닾?⑸땲??
+ * 媛쒖씤 吏移??ㅻ쾭?섑븨/?꾨갑 ?湲?諛뺤뒪 移⑦닾/?덉そ ?뚭퀬?ㅺ린 ??? 紐⑺몴?먯쓣 異붽?濡?蹂댁젙?섍퀬, ?댁옣 ?좎닔???곗튂?쇱씤 諛뽰쑝濡?嫄몄뼱?섍컩?덈떎.
+ * ?대룞: player.x += (targetX - x) * moveRate,
+ * moveRate = 0.035 * (speedStat / 80) * (0.5 + stamina / 200) * playbackSpeed * ?쒗룷 ?띾룄諛곗쑉 * ?쇱빱猷??좏겕 ?띾룄諛곗쑉
+ * (speedStat ?먮뒗 ?ъ????곹빀??諛곗쑉???대? 諛섏쁺??
+ * @param {Object} engine
+ * @param {Object} state
+ * @param {number} dtScale 60fps 湲곗? ?꾨젅??諛곗닔
+ * @param {number} now
+ * @returns {void}
+ */
+function updatePhysics(engine, state, dtScale, now) {
+  const { ball, agents } = engine;
+  const live = !state.isPaused;
+  const speed = state.playbackSpeed;
+  const all = [...agents.values()];
+  const teamOf = (agent) => (agent.team === 'HOME' ? state.homeTeam : state.awayTeam);
+
+  for (const a of all) a.hasBall = ball.mode === 'carried' && a.id === ball.ownerId;
+
+  const defendingSide = engine.attackTeam === 'HOME' ? 'AWAY' : 'HOME';
+  const defendingTeam = defendingSide === 'HOME' ? state.homeTeam : state.awayTeam;
+  const presserCount = getTacticEffect(defendingTeam.tactics, 'pressing').pressers;
+  const defenders = all.filter((a) => a.team === defendingSide && !a.isSentOff && a.role !== 'GK');
+  const byDistance = [...defenders].sort((a, b) => distance(a, ball) - distance(b, ball));
+  const pressers = new Set(byDistance.slice(0, presserCount).map((a) => a.id));
+  for (const a of defenders) {
+    const inst = getInstructionDef(a.instruction);
+    if (inst.pressForward && distance(a, ball) < 45) pressers.add(a.id);
+    if (inst.stepUp && distance(a, ball) < 28) pressers.add(a.id);
+  }
+
+  for (const a of all) {
+    if (a.isSentOff) {
+      if (a.y < -4 || a.y > 104) continue;
+      a.targetX = a.x;
+      a.targetY = a.y < 50 ? -8 : 108;
+    } else {
+      const team = teamOf(a);
+      const dir = a.team === 'HOME' ? 1 : -1;
+      const mentality = getTacticEffect(team.tactics, 'mentality');
+      const lineEffect = getTacticEffect(team.tactics, 'defensiveLine');
+      const inst = getInstructionDef(a.instruction);
+      const isAttacking = engine.attackTeam === a.team;
+
+      let tacticalX = a.baseX + (ball.x - 50) * (inst.ballShift ?? 0.25) + dir * mentality.lineOffset;
+      if (a.role === 'DF') tacticalX += dir * lineEffect.lineOffset;
+      let tacticalY = a.baseY + (ball.y - 50) * 0.15;
+      if (a.role === 'GK') {
+        tacticalX = a.baseX + (ball.x - 50) * 0.04;
+        tacticalY = 50 + (ball.y - 50) * 0.18;
+      }
+
+      let tx = tacticalX;
+      let ty = tacticalY;
+      if (live && a.role !== 'GK') {
+        if (isAttacking) tx += dir * (inst.advanceX || 0);
+        else tx -= dir * (inst.retreatX || 0);
+        if (inst.maxHomeX !== undefined) tx = dir > 0 ? Math.min(tx, inst.maxHomeX) : Math.max(tx, 100 - inst.maxHomeX);
+        if (inst.yPull && (isAttacking || a.instruction === 'PLAYMAKER')) ty += (50 - ty) * inst.yPull;
+        if (inst.yPush) ty += ((ty < 50 ? 10 : 90) - ty) * inst.yPush;
+      }
+      if (live) {
+        if (a.hasBall) {
+          const goalX = a.team === 'HOME' ? 92 : 8;
+          tx = dir > 0 ? Math.min(goalX, a.x + 10) : Math.max(goalX, a.x - 10);
+          ty = a.y + (50 - a.y) * 0.12;
+        } else if (pressers.has(a.id)) {
+          tx = ball.x;
+          ty = ball.y;
+        } else if (isAttacking && a.role === 'FW') {
+          tx += 14 * dir;
+        }
+        ty += Math.sin(now / 700 + a.phase) * 0.6;
+      }
+      a.targetX = clamp(tx, 3, 97);
+      a.targetY = clamp(ty, 3, 97);
+    }
+
+    const team = teamOf(a);
+    const paceMul = getTacticEffect(team.tactics, 'tempo').canvasSpeed * team.talkEffect.speedMul;
+    const moveRate = Math.min(0.5, 0.035 * (a.speedStat / 80) * (0.5 + a.stamina / 200) * speed * paceMul);
+    const rate = 1 - Math.pow(1 - moveRate, dtScale);
+    const prevX = a.x;
+    const prevY = a.y;
+    a.x += (a.targetX - a.x) * rate;
+    a.y += (a.targetY - a.y) * rate;
+    a.vx = a.x - prevX;
+    a.vy = a.y - prevY;
+  }
+
+  if (live) updateBall(engine, state, dtScale, now);
+}
+
+/**
+ * 泥대젰(0~100)???곕Ⅸ 寃뚯씠吏 ?됱긽(珥덈줉 -> ?몃옉 -> 鍮④컯).
+ * @param {number} stamina
+ * @returns {string}
+ */
+function staminaColor(stamina) {
+  if (stamina > 60) return '#22c55e';
+  if (stamina > 30) return '#eab308';
+  return '#ef4444';
+}
+
+/**
+ * ?좎닔 癒몃━ ???쇱떆 ?쒖떆(移대뱶/?뚯슱/援먯껜 ?ъ엯)瑜?洹몃┰?덈떎.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object} agent
+ * @param {number} px
+ * @param {number} py
+ * @param {number} now
+ * @returns {void}
+ */
+function drawFlash(ctx, agent, px, py, now) {
+  if (!agent.flash || now >= agent.flash.until) return;
+  const remaining = agent.flash.until - now;
+  const alpha = Math.min(1, remaining / 400);
+  const bob = Math.sin(now / 120) * 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (agent.flash.type === 'YELLOW' || agent.flash.type === 'RED') {
+    ctx.fillStyle = agent.flash.type === 'YELLOW' ? '#facc15' : '#ef4444';
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(px - 6, py - 42 + bob, 12, 17);
+    ctx.strokeRect(px - 6, py - 42 + bob, 12, 17);
+  } else {
+    const label = agent.flash.type === 'SUB' ? 'IN ?? : '?뚯슱!';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = agent.flash.type === 'SUB' ? '#16a34a' : '#f97316';
+    const w = ctx.measureText(label).width + 12;
+    ctx.fillRect(px - w / 2, py - 40 + bob, w, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, px, py - 31 + bob);
+  }
+  ctx.restore();
+}
+
+/**
+ * ?좎닔 22紐??먰삎 留덉빱 + ?깅쾲??+ ?대쫫 + 泥대젰 諛?怨?異뺢뎄怨듭쓣 洹몃┰?덈떎.
+ * 怨?蹂댁쑀?먯뿉寃뚮뒗 ?몃? ?ㅼ삩 留? 寃쎄퀬 1???좎닔?먭쾶???곗륫 ?곷떒 ?몃? ?ш컖??留덊겕瑜??쒖떆?⑸땲??
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object} engine
+ * @param {number} now
+ * @returns {void}
+ */
+function drawPlayersAndBall(ctx, engine, now) {
+  const agents = [...engine.agents.values()]
+    .filter((a) => !(a.isSentOff && (a.y < -4 || a.y > 104)))
+    .sort((a, b) => a.y - b.y);
+
+  for (const a of agents) {
+    const px = toPx(a.x);
+    const py = toPy(a.y);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(px + 2, py + 6, 12, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (a.hasBall) {
+      ctx.save();
+      ctx.shadowColor = '#facc15';
+      ctx.shadowBlur = 14;
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(px, py, 17, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const isGK = a.role === 'GK';
+    let fill;
+    if (isGK) fill = a.team === 'HOME' ? '#facc15' : '#22c55e';
+    else fill = a.team === 'HOME' ? '#2563eb' : '#e11d48';
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = isGK && a.team === 'HOME' ? '#1f2937' : '#ffffff';
+    ctx.fillText(String(a.backNumber), px, py + 0.5);
+
+    ctx.font = '11px sans-serif';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeText(a.name, px, py + 25);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(a.name, px, py + 25);
+
+    const barWidth = 26;
+    const stamina = clamp(a.stamina, 0, 100);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(px - barWidth / 2, py + 31, barWidth, 4);
+    ctx.fillStyle = staminaColor(stamina);
+    ctx.fillRect(px - barWidth / 2, py + 31, (barWidth * stamina) / 100, 4);
+
+    if (a.team === 'HOME' && a.familiarity && a.familiarity !== 'NATURAL') {
+      ctx.fillStyle = FAMILIARITY_META[a.familiarity].color;
+      ctx.strokeStyle = '#111827';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px - 11, py - 11, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    if (a.yellowCards === 1) {
+      ctx.fillStyle = '#facc15';
+      ctx.strokeStyle = '#111827';
+      ctx.lineWidth = 1;
+      ctx.fillRect(px + 8, py - 18, 6, 9);
+      ctx.strokeRect(px + 8, py - 18, 6, 9);
+    }
+
+    drawFlash(ctx, a, px, py, now);
+  }
+
+  const { ball } = engine;
+  const bx = toPx(ball.x);
+  const by = toPy(ball.y);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(bx + 1.5, by + 4, 5, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (ball.isShot) {
+    ctx.save();
+    ctx.shadowColor = '#fde047';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = '#fef9c3';
+    ctx.beginPath();
+    ctx.arc(bx, by, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#111827';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(bx, by, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/**
+ * ?붾㈃ 以묒븰??怨⑤뱶 'GOAL!!' ?ㅻ쾭?덉씠 諛곕꼫瑜?洹몃┰?덈떎. (2珥덇컙 ?앹뾽, ?섏씠?????꾩썐 + 留λ룞)
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{startedAt:number, until:number, team:string, scorer:string}} celebration
+ * @param {number} now
+ * @returns {void}
+ */
+function drawGoalBanner(ctx, celebration, now) {
+  const t = clamp((now - celebration.startedAt) / CELEBRATION_MS, 0, 1);
+  const alpha = t < 0.1 ? t / 0.1 : t > 0.85 ? (1 - t) / 0.15 : 1;
+  const pulse = 1 + 0.06 * Math.sin(t * Math.PI * 10);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(2,6,23,0.6)';
+  ctx.fillRect(0, HEIGHT / 2 - 95, WIDTH, 190);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillRect(0, HEIGHT / 2 - 95, WIDTH, 3);
+  ctx.fillRect(0, HEIGHT / 2 + 92, WIDTH, 3);
+
+  ctx.translate(WIDTH / 2, HEIGHT / 2 - 12);
+  ctx.scale(pulse, pulse);
+  ctx.font = '900 96px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = '#78350f';
+  ctx.strokeText('GOAL!!', 0, 0);
+  const gradient = ctx.createLinearGradient(0, -48, 0, 48);
+  gradient.addColorStop(0, '#fef08a');
+  gradient.addColorStop(1, '#f59e0b');
+  ctx.fillStyle = gradient;
+  ctx.fillText('GOAL!!', 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = celebration.team === 'HOME' ? '#93c5fd' : '#fda4af';
+  ctx.fillText(`??${celebration.scorer} 쨌 ${celebration.teamName}`, WIDTH / 2, HEIGHT / 2 + 62);
+  ctx.restore();
+}
+
+/**
+ * ???꾨젅?꾩쓣 ?뚮뜑留곹빀?덈떎: 援ъ옣 -> ?좎닔/怨?-> ?쇱떆?뺤? ?쒖떆 -> 怨?諛곕꼫.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object} engine
+ * @param {Object} state
+ * @param {number} now
+ * @returns {void}
+ */
+function render(ctx, engine, state, now) {
+  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+  drawPitch(ctx, WIDTH, HEIGHT);
+  if (!state.homeTeam || !state.awayTeam) return;
+  drawPlayersAndBall(ctx, engine, now);
+
+  if (state.isPaused && state.status === 'live') {
+    ctx.fillStyle = 'rgba(2,6,23,0.55)';
+    ctx.fillRect(WIDTH / 2 - 120, 10, 240, 30);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('???쇱떆?뺤? 쨌 ?묒쟾 吏??以?, WIDTH / 2, 25);
+  }
+  if (engine.celebration && now < engine.celebration.until) {
+    drawGoalBanner(ctx, engine.celebration, now);
+  }
+}
+
+/**
+ * FM ?대옒??酉??ㅽ??쇱쓽 2D 諛붾몣??寃쎄린 ?붾㈃. requestAnimationFrame 湲곕컲 60fps 猷⑦봽?먯꽌
+ * ?쇱씠釉??ㅽ넗?댁쓽 ?곹깭(?좎닔/?꾩닠/???≪뀡/諛곗냽/?쇱떆?뺤?)瑜??쎌뼱 ?좎닔 22紐낃낵 怨듭쓣 ?吏곸엯?덈떎.
+ * @returns {JSX.Element}
+ */
+export default function PitchCanvas2D() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = WIDTH * dpr;
+    canvas.height = HEIGHT * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const engine = createEngine();
+    let rafId = 0;
+    let last = performance.now();
+
+    /**
+     * 留??꾨젅???몄텧?섎뒗 硫붿씤 猷⑦봽.
+     * @param {number} now requestAnimationFrame ??꾩뒪?ы봽
+     * @returns {void}
+     */
+    const loop = (now) => {
+      const dtScale = Math.min(now - last, 50) / (1000 / 60);
+      last = now;
+      const state = useLiveMatchStore.getState();
+
+      if (state.homeTeam && state.awayTeam) {
+        syncAgents(engine, state, now);
+
+        const action = state.currentTickAction;
+        if (action && action.seq !== engine.lastSeq) {
+          engine.lastSeq = action.seq;
+          submitAction(engine, action, now);
+        }
+        updateCelebration(engine, now);
+        drainPending(engine, now);
+
+        updatePhysics(engine, state, dtScale, now);
+      }
+
+      render(ctx, engine, state, now);
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full rounded-xl border border-slate-700 shadow-2xl"
+      style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
+    />
+  );
+}
