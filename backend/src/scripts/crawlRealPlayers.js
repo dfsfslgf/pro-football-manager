@@ -135,7 +135,7 @@ function generateStatsByPosition(mainPos, ovrBase) {
 }
 
 async function fetchClubPlayersWithRetry(realClub, safeClub, leagueCode, ovrBase) {
-  const url = `https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?t=${encodeURIComponent(realClub)}`;
+  const url = `https://www.thesportsdb.com/api/v1/json/123/searchplayers.php?t=${encodeURIComponent(realClub)}`;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const res = await fetch(url);

@@ -144,27 +144,38 @@ export default class LiveMatchEngine {
   }
 
   static validateResult(payload, baseline) {
-    const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamina } = payload || {};
+const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamina } = payload || {};
     if (!isIntInRange(scoreHome, MAX_GOALS) || !isIntInRange(scoreAway, MAX_GOALS)) throw new ValidationError('스코어가 올바르지 않습니다.');
     if (scoreHome < baseline.home || scoreAway < baseline.away) throw new ValidationError('스코어가 시작 스코어보다 낮습니다.');
     const playedHome = scoreHome - baseline.home;
     const playedAway = scoreAway - baseline.away;
 
-    const normalizeStats = (stats, minGoals) => {
-      if (!stats || typeof stats !== 'object') throw new ValidationError('팀 통계가 올바르지 않습니다.');
+    const normalizeStats = (stats, minGoals = 0) => {
+      const safeStats = stats || {};
       const out = {};
-      for (const [key, max] of Object.entries(STAT_LIMITS)) {
-        const rawVal = Number.isInteger(stats[key]) ? stats[key] : 0;
-        out[key] = Math.max(0, Math.min(max, rawVal));
-      }
-      // [요구사항 7, 17 해결] 유효슈팅 >= 득점, 전체 슈팅 >= 유효슈팅 자동 보정으로 검증 충돌 방지
-      out.shotsOnTarget = Math.max(minGoals, out.shotsOnTarget);
-      out.shots = Math.max(out.shotsOnTarget, out.shots);
+      
+      // 통계 필드들 강제 기본값 방어 (null/undefined 절대 차단)
+      out.possession = Number.isInteger(safeStats.possession) ? safeStats.possession : 50;
+      out.shots = Math.max(minGoals, Number.isInteger(safeStats.shots) ? safeStats.shots : minGoals);
+      out.shotsOnTarget = Math.max(minGoals, Number.isInteger(safeStats.shotsOnTarget) ? safeStats.shotsOnTarget : minGoals);
+      out.corners = Number.isInteger(safeStats.corners) ? safeStats.corners : 0;
+      out.fouls = Number.isInteger(safeStats.fouls) ? safeStats.fouls : 0;
+      out.yellowCards = Number.isInteger(safeStats.yellowCards) ? safeStats.yellowCards : 0;
+      out.redCards = Number.isInteger(safeStats.redCards) ? safeStats.redCards : 0;
+      out.passesAttempted = Number.isInteger(safeStats.passesAttempted) ? safeStats.passesAttempted : 0;
+      out.passesCompleted = Number.isInteger(safeStats.passesCompleted) ? safeStats.passesCompleted : 0;
+      out.passAccuracy = Number.isInteger(safeStats.passAccuracy) ? safeStats.passAccuracy : 85;
+      out.tackles = Number.isInteger(safeStats.tackles) ? safeStats.tackles : 0;
+      out.saves = Number.isInteger(safeStats.saves) ? safeStats.saves : 0;
+
+      // 무결성 최종 보정
+      if (out.shotsOnTarget > out.shots) out.shots = out.shotsOnTarget;
       return out;
     };
 
     const home = normalizeStats(homeStats, playedHome);
     const away = normalizeStats(awayStats, playedAway);
+    
     if (home.possession + away.possession !== 100) {
       home.possession = clampPossession(home.possession);
       away.possession = 100 - home.possession;

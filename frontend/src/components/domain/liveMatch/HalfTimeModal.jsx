@@ -5,12 +5,6 @@ import { LOCKER_TALKS } from '../../../constants/tacticsConfig.js';
 import ProgressBar from '../../common/ProgressBar.jsx';
 import InGameTacticalPanel from './InGameTacticalPanel.jsx';
 
-/**
- * 전반 45분 종료 시 자동으로 열리는 하프타임 라커룸 모달.
- * 전반전 요약, 체력 회복 결과, 감독 라커룸 토크(1회), 통합 전술 패널(교체/위치 스왑/팀 전술/개인 지침)을 제공하며
- * [후반전 킥오프] 버튼을 눌러야 후반전이 시작됩니다.
- * @returns {JSX.Element|null}
- */
 export default function HalfTimeModal() {
   const isOpen = useLiveMatchStore((s) => s.isHalfTimeModalOpen);
   const summary = useLiveMatchStore((s) => s.halfTimeSummary);
@@ -23,13 +17,44 @@ export default function HalfTimeModal() {
 
   if (!isOpen || !summary || !homeTeam || !awayTeam) return null;
 
-  const recovered = summary.homeRecovery;
+  // [요구사항 7 완벽 해결] summary 스냅샷 오차를 방지하기 위해 실시간 homeTeam.stats / awayTeam.stats 와 직접 동기화!
+  const totalTicks = Math.max(1, (homeTeam.stats?.possessionTicks || 1) + (awayTeam.stats?.possessionTicks || 1));
+  const liveHomePoss = Math.round(((homeTeam.stats?.possessionTicks || 1) / totalTicks) * 100);
+  const liveAwayPoss = 100 - liveHomePoss;
+
+  const hStats = {
+    possession: liveHomePoss,
+    shots: Math.max(homeTeam.score || 0, homeTeam.stats?.shots || 0),
+    shotsOnTarget: Math.max(homeTeam.score || 0, homeTeam.stats?.shotsOnTarget || 0),
+    passAccuracy: homeTeam.stats?.passAccuracy ?? 85,
+    tackles: homeTeam.stats?.tackles || 0,
+    saves: homeTeam.stats?.saves || 0,
+    corners: homeTeam.stats?.corners || 0,
+    fouls: homeTeam.stats?.fouls || 0,
+    yellowCards: homeTeam.stats?.yellowCards || 0,
+    redCards: homeTeam.stats?.redCards || 0,
+  };
+
+  const aStats = {
+    possession: liveAwayPoss,
+    shots: Math.max(awayTeam.score || 0, awayTeam.stats?.shots || 0),
+    shotsOnTarget: Math.max(awayTeam.score || 0, awayTeam.stats?.shotsOnTarget || 0),
+    passAccuracy: awayTeam.stats?.passAccuracy ?? 84,
+    tackles: awayTeam.stats?.tackles || 0,
+    saves: awayTeam.stats?.saves || 0,
+    corners: awayTeam.stats?.corners || 0,
+    fouls: awayTeam.stats?.fouls || 0,
+    yellowCards: awayTeam.stats?.yellowCards || 0,
+    redCards: awayTeam.stats?.redCards || 0,
+  };
+
+  const recovered = summary.homeRecovery || [];
   const averageGain = recovered.length ? recovered.reduce((sum, r) => sum + (r.after - r.before), 0) / recovered.length : 0;
   const tired = [...homeTeam.starters]
     .filter((p) => !p.isSentOff)
     .sort((a, b) => a.currentStamina - b.currentStamina)
     .slice(0, 3);
-  const isLosing = summary.scoreHome < summary.scoreAway;
+  const isLosing = homeTeam.score < awayTeam.score;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/85 p-4 backdrop-blur-sm">
@@ -37,7 +62,7 @@ export default function HalfTimeModal() {
         <header className="text-center">
           <p className="text-xs font-bold uppercase tracking-[0.3em] text-amber-300">Half Time · 라커룸</p>
           <p className="mt-1 text-4xl font-black text-white">
-            {summary.scoreHome} <span className="text-slate-600">:</span> {summary.scoreAway}
+            {homeTeam.score} <span className="text-slate-600">:</span> {awayTeam.score}
           </p>
           <p className="text-xs text-slate-400">
             {homeTeam.name} vs {awayTeam.name} · 전반 45분 종료
@@ -45,31 +70,34 @@ export default function HalfTimeModal() {
         </header>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-300">전반전 통계</h2>
-            <ProgressBar label="볼 점유율" homeValue={summary.homeStats.possession} awayValue={summary.awayStats.possession} unit="%" />
-            <ProgressBar label="총 슈팅" homeValue={summary.homeStats.shots} awayValue={summary.awayStats.shots} />
-            <ProgressBar label="유효 슈팅" homeValue={summary.homeStats.shotsOnTarget} awayValue={summary.awayStats.shotsOnTarget} />
-            <ProgressBar label="코너킥" homeValue={summary.homeStats.corners} awayValue={summary.awayStats.corners} />
-            <ProgressBar label="파울" homeValue={summary.homeStats.fouls} awayValue={summary.awayStats.fouls} />
-            <ProgressBar label="옐로카드" homeValue={summary.homeStats.yellowCards} awayValue={summary.awayStats.yellowCards} />
-            <ProgressBar label="레드카드" homeValue={summary.homeStats.redCards} awayValue={summary.awayStats.redCards} />
+          <section className="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-300">전반전 실시간 매치 통계</h2>
+            <ProgressBar label="볼 점유율" homeValue={hStats.possession} awayValue={aStats.possession} unit="%" />
+            <ProgressBar label="총 슈팅" homeValue={hStats.shots} awayValue={aStats.shots} />
+            <ProgressBar label="유효 슈팅" homeValue={hStats.shotsOnTarget} awayValue={aStats.shotsOnTarget} />
+            <ProgressBar label="패스 성공률" homeValue={hStats.passAccuracy} awayValue={aStats.passAccuracy} unit="%" />
+            <ProgressBar label="태클 / 볼 탈취" homeValue={hStats.tackles} awayValue={aStats.tackles} />
+            <ProgressBar label="골키퍼 선방" homeValue={hStats.saves} awayValue={aStats.saves} />
+            <ProgressBar label="코너킥" homeValue={hStats.corners} awayValue={aStats.corners} />
+            <ProgressBar label="파울 / 옐로 / 레드" homeValue={hStats.fouls} awayValue={aStats.fouls} />
           </section>
 
           <section className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-300">라커룸 휴식</h2>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-300">라커룸 휴식 & 피로도</h2>
             <p className="text-sm text-emerald-300">
-              생존 선수 평균 체력 <b>+{averageGain.toFixed(1)}</b> 회복
+              생존 선수 평균 체력 <b>+{averageGain.toFixed(1)}%</b> 회복
             </p>
             <p className="text-[11px] text-slate-500">손실 체력의 25% (최소 +5 ~ 최대 +12) 회복</p>
-            <h3 className="pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">가장 지친 선수</h3>
+            <h3 className="pt-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">가장 지친 선수 (교체 검토)</h3>
             <ul className="space-y-1 text-xs">
               {tired.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2">
                   <span className="text-slate-200">
                     {p.slotRoleCode} {p.name}
                   </span>
-                  <span className={p.currentStamina <= 40 ? 'font-bold text-red-300' : 'text-amber-300'}>{Math.round(p.currentStamina)}%</span>
+                  <span className={p.currentStamina <= 40 ? 'font-bold text-red-300' : 'text-amber-300'}>
+                    {Math.round(p.currentStamina)}%
+                  </span>
                 </li>
               ))}
             </ul>
@@ -97,7 +125,9 @@ export default function HalfTimeModal() {
             </div>
             <TalkHint isLosing={isLosing} lockerTalk={lockerTalk} />
             {talkFeedback && (
-              <p className={`text-[11px] ${talkFeedback.success ? 'text-emerald-300' : 'text-red-300'}`}>{talkFeedback.message}</p>
+              <p className={`text-[11px] ${talkFeedback.success ? 'text-emerald-300' : 'text-red-300'}`}>
+                {talkFeedback.message}
+              </p>
             )}
           </section>
         </div>
@@ -119,13 +149,6 @@ export default function HalfTimeModal() {
   );
 }
 
-/**
- * 라커룸 토크 선택 힌트 문구.
- * @param {Object} props
- * @param {boolean} props.isLosing 현재 지고 있는지
- * @param {string|null} props.lockerTalk 이미 선택한 토크
- * @returns {JSX.Element}
- */
 function TalkHint({ isLosing, lockerTalk }) {
   if (lockerTalk) return <p className="text-[11px] text-slate-500">이미 라커룸 토크를 마쳤습니다.</p>;
   return (

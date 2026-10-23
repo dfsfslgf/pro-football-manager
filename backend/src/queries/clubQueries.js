@@ -13,21 +13,22 @@ export const INSERT_WALLET = 'INSERT INTO user_wallets (user_id, cash_paid, cash
 
 /** 구성 조건(포지션 + 세부 포지션)에 맞는 일반 등급 마스터 선수 조회 */
 export const SELECT_COMMON_MASTER_BY_ROLE =
-  'SELECT id, main_position AS mainPosition, preferred_role AS preferredRole FROM player_master WHERE main_position = ? AND preferred_role = ? AND drop_weight >= 100 ORDER BY id LIMIT 12';
+  'SELECT id, main_position AS mainPosition, preferred_role AS preferredRole FROM player_master WHERE main_position = ? AND preferred_role = ? AND drop_weight >= 100 ORDER BY id LIMIT 15';
 export const SELECT_COMMON_MASTER_BY_POSITION =
-  'SELECT id, main_position AS mainPosition, preferred_role AS preferredRole FROM player_master WHERE main_position = ? AND drop_weight >= 100 ORDER BY id LIMIT 12';
+  'SELECT id, main_position AS mainPosition, preferred_role AS preferredRole FROM player_master WHERE main_position = ? AND drop_weight >= 100 ORDER BY id LIMIT 15';
 
 export const INSERT_STARTER_PLAYER =
   'INSERT INTO user_players (user_id, player_id, level, exp, stamina, is_starter, lineup_slot) VALUES (?, ?, 1, 0, 100, ?, ?)';
 
-/** 보유 선수 전체(마스터 JOIN + 누적 기록) */
+/** 보유 선수 전체(마스터 JOIN + 누적 기록, 유효슈팅 >= 득점 DB 레벨 보정 포함) */
 export const SELECT_FULL_PLAYERS = `
   SELECT
     up.id AS userPlayerId, up.player_id AS playerId, up.level, up.exp, up.stamina,
     up.is_starter AS isStarter, up.lineup_slot AS lineupSlot, up.instruction, up.secondary_role AS secondaryRole,
     up.bonus_gauge AS bonusGauge, up.matches_played AS matchesPlayed, up.goals, up.assists,
     up.clean_sheets AS cleanSheets, up.goals_conceded AS goalsConceded, up.saves,
-    up.shots_on_target AS shotsOnTarget, up.yellow_cards AS yellowCards, up.red_cards AS redCards,
+    GREATEST(up.goals, up.shots_on_target) AS shotsOnTarget,
+    up.yellow_cards AS yellowCards, up.red_cards AS redCards,
     up.rating_sum AS ratingSum,
     pm.name, pm.main_position AS mainPosition, pm.preferred_role AS preferredRole,
     pm.drop_weight AS dropWeight, pm.base_stats AS baseStats, pm.tags
@@ -56,18 +57,24 @@ export const SELECT_LOW_STAMINA = 'SELECT id, stamina FROM user_players WHERE us
 export const UPDATE_PLAYER_INSTRUCTION = 'UPDATE user_players SET instruction = ? WHERE id = ? AND user_id = ?';
 export const RESET_ALL_INSTRUCTIONS = 'UPDATE user_players SET instruction = NULL WHERE user_id = ?';
 
-/** 경기 후 선수 누적 기록 가산 + 경험치/게이지 반영 */
+
 export const UPDATE_PLAYER_MATCH_STATS = `
   UPDATE user_players SET
     matches_played = matches_played + ?,
-    goals = goals + ?, assists = assists + ?,
-    clean_sheets = clean_sheets + ?, goals_conceded = goals_conceded + ?, saves = saves + ?,
-    shots_on_target = shots_on_target + ?, yellow_cards = yellow_cards + ?, red_cards = red_cards + ?,
-    rating_sum = rating_sum + ?, exp = exp + ?, bonus_gauge = LEAST(100, bonus_gauge + ?),
+    goals = goals + ?,
+    assists = assists + ?,
+    clean_sheets = clean_sheets + ?,
+    goals_conceded = goals_conceded + ?,
+    saves = saves + ?,
+    shots_on_target = shots_on_target + ?,
+    yellow_cards = yellow_cards + ?,
+    red_cards = red_cards + ?,
+    rating_sum = rating_sum + ?,
+    exp = exp + ?,
+    bonus_gauge = LEAST(100, bonus_gauge + ?),
     stamina = ?
   WHERE id = ? AND user_id = ?
 `;
-
 export const SELECT_PLAYER_POSITIONS =
   'SELECT up.id AS userPlayerId, up.stamina, pm.name, pm.main_position AS mainPosition FROM user_players up INNER JOIN player_master pm ON up.player_id = pm.id WHERE up.user_id = ? AND up.id IN (?)';
 

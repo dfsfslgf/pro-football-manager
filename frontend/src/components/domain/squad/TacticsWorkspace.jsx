@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ArrowLeftRight } from 'lucide-react';
 import useLiveMatchStore from '../../../store/useLiveMatchStore.js';
@@ -22,13 +22,8 @@ import StaminaBar from '../../common/StaminaBar.jsx';
 import InteractiveMiniPitch from '../liveMatch/InteractiveMiniPitch.jsx';
 
 const TONE_CLASS = { good: 'text-emerald-300', bad: 'text-red-300', neutral: 'text-slate-300' };
+const POS_FILTER_TABS = ['ALL', 'FW', 'MF', 'DF', 'GK'];
 
-/**
- * 전술 작업대가 다루는 팀 모델(라이브 경기 스토어 또는 경기 전 스쿼드 스토어)을 통일된 인터페이스로 반환합니다.
- * 두 스토어의 액션은 모두 `{success, message}` 를 돌려주므로 화면은 출처를 신경 쓰지 않습니다.
- * @param {'live'|'squad'} source 'live': 진행 중인 경기(교체 횟수 제한 있음), 'squad': 경기 전 라인업 편집(제한 없음)
- * @returns {Object|null} { isLive, formation, tactics, starters, bench, reserve, subsLeft, swap, substitute, swapBenchReserve, changeFormation, updateTactics, setInstruction }
- */
 function useWorkspaceModel(source) {
   const homeTeam = useLiveMatchStore((s) => s.homeTeam);
   const live = useLiveMatchStore(
@@ -86,23 +81,15 @@ function useWorkspaceModel(source) {
   };
 }
 
-/**
- * 포지션 적합도 뱃지.
- * @param {Object} props
- * @param {'NATURAL'|'ADEQUATE'|'UNFAMILIAR'|'SEVERE'} props.familiarity
- * @returns {JSX.Element}
- */
 function FamiliarityBadge({ familiarity }) {
-  const meta = FAMILIARITY_META[familiarity];
-  return <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.badgeClass}`}>{meta.label}</span>;
+  const meta = FAMILIARITY_META[familiarity] || FAMILIARITY_META.NATURAL;
+  return (
+    <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${meta.badgeClass}`}>
+      {meta.label}
+    </span>
+  );
 }
 
-/**
- * 피드백 배너(성공/실패 메시지).
- * @param {Object} props
- * @param {{success:boolean, message:string}|null} props.feedback
- * @returns {JSX.Element|null}
- */
 function Feedback({ feedback }) {
   if (!feedback) return null;
   return (
@@ -117,18 +104,38 @@ function Feedback({ feedback }) {
 }
 
 /**
- * 필드 선수 카드: 슬롯명, 주 포지션, 적합도 뱃지, 체력 바, 평점/OVR, 경고 표시. 퇴장 공석은 "공석" 카드로 표시됩니다.
- * @param {Object} props
- * @param {Object} props.player 필드 슬롯의 선수
- * @param {boolean} props.isLive 라이브 경기 여부 (라이브: 평점, 경기 전: OVR)
- * @param {boolean} props.isSelected
- * @param {() => void} props.onClick
- * @returns {JSX.Element}
+ * [요구사항 49 반영] 선수 카드 하단에 구체적인 수치(골결정력, 스피드, 패스, 수비 등)를 한눈에 보여주는 배지 바
  */
+function InlineNumericStats({ player }) {
+  const st = player.effectiveStats || player.baseStats || {};
+  if (player.mainPosition === 'GK' || player.slotRoleCode === 'GK') {
+    return (
+      <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
+        <span>반사신경 <b className="text-emerald-300">{Math.round(st.gkReflexes || 75)}</b></span>
+        <span>패스 <b className="text-sky-300">{Math.round(st.passing || 65)}</b></span>
+        <span>피지컬 <b className="text-amber-300">{Math.round(st.physical || 70)}</b></span>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-slate-300">
+      <span>결정력 <b className="text-amber-300">{Math.round(st.shooting || 72)}</b></span>
+      <span>스피드 <b className="text-emerald-300">{Math.round(st.speed || 75)}</b></span>
+      <span>패스 <b className="text-sky-300">{Math.round(st.passing || 74)}</b></span>
+      <span>드리블 <b className="text-purple-300">{Math.round(st.dribbling || 74)}</b></span>
+      <span>수비 <b className="text-rose-300">{Math.round(st.defense || 68)}</b></span>
+    </div>
+  );
+}
+
 function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
   const stamina = player.currentStamina ?? player.stamina;
   const exhausted = isLive && !player.isSentOff && stamina <= MATCH_RULES.EXHAUSTED_STAMINA;
-  const preferred = player.roleCodes?.length ? ` (${player.roleCodes.join('/')})` : player.preferredRoleCode ? ` (${player.preferredRoleCode})` : '';
+  const preferred = player.roleCodes?.length
+    ? ` (${player.roleCodes.join('/')})`
+    : player.preferredRoleCode
+    ? ` (${player.preferredRoleCode})`
+    : '';
 
   if (player.isSentOff) {
     return (
@@ -144,7 +151,7 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
           <span className="flex-1 truncate font-semibold text-red-300">
             퇴장 공석 · <span className="line-through">{player.name}</span>
           </span>
-          <span className="text-[10px] text-red-300">살아있는 선수를 이 슬롯으로 이동시킬 수 있습니다</span>
+          <span className="text-[10px] text-red-300">생존 선수를 이 슬롯으로 이동 가능</span>
         </div>
       </button>
     );
@@ -162,7 +169,9 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
         <span className="w-10 rounded bg-slate-700 py-0.5 text-center font-bold text-slate-200">{player.slotRoleCode}</span>
         <span className="flex-1 truncate font-semibold text-slate-100">{player.name}</span>
         {player.yellowCards === 1 && <span className="h-3.5 w-2.5 rounded-sm bg-yellow-400" title="경고 1장" />}
-        <span className="text-slate-400">{isLive ? `평점 ${getRating(player).toFixed(1)}` : `OVR ${player.overall || getOverall(player)}`}</span>
+        <span className="font-bold text-emerald-300">
+          {isLive ? `평점 ${getRating(player).toFixed(1)}` : `OVR ${player.overall || getOverall(player)}`}
+        </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
         <span>
@@ -171,6 +180,7 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
         </span>
         <FamiliarityBadge familiarity={player.familiarity} />
       </div>
+      <InlineNumericStats player={player} />
       <div className="mt-1 flex items-center gap-2">
         <StaminaBar value={stamina} showLabel className="flex-1" />
         {exhausted && <span className="animate-pulse whitespace-nowrap text-[10px] font-bold text-red-400">체력 고갈! 교체 권장</span>}
@@ -179,17 +189,10 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
   );
 }
 
-/**
- * 벤치/예비 선수 카드. 필드 선수가 선택된 상태면 그 슬롯에 투입했을 때의 적합도를 미리 보여줍니다.
- * @param {Object} props
- * @param {Object} props.player
- * @param {boolean} props.isSelected
- * @param {Object|null} props.selectedFieldSlot 선택된 필드 슬롯 선수
- * @param {() => void} props.onClick
- * @returns {JSX.Element}
- */
 function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
-  const preview = selectedFieldSlot ? calculatePositionFamiliarity(player.mainPosition, selectedFieldSlot.slotRoleCode, getRoleCodes(player)).familiarity : null;
+  const preview = selectedFieldSlot
+    ? calculatePositionFamiliarity(player.mainPosition, selectedFieldSlot.slotRoleCode, getRoleCodes(player)).familiarity
+    : null;
   return (
     <button
       type="button"
@@ -201,7 +204,7 @@ function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
       <div className="flex items-center gap-2 text-xs">
         <span className="w-10 rounded bg-slate-700 py-0.5 text-center font-bold text-slate-200">{player.mainPosition}</span>
         <span className="flex-1 truncate font-semibold text-slate-100">{player.name}</span>
-        <span className="text-slate-400">OVR {player.overall || getOverall(player)}</span>
+        <span className="font-bold text-emerald-300">OVR {player.overall || getOverall(player)}</span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
         <span>
@@ -216,21 +219,16 @@ function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
           </>
         )}
       </div>
+      <InlineNumericStats player={player} />
       <StaminaBar value={player.currentStamina ?? player.stamina} showLabel className="mt-1" />
     </button>
   );
 }
 
-/**
- * 탭 1: 포지션 변경 & 선수 교체. 필드 선수 <-> 필드 선수는 교체 카드 소모 없이 위치 스왑,
- * 필드 선수 <-> 벤치 선수는 (경기 중) 교체 카드 1장 소모 교체가 클릭만으로 실행됩니다. 경기 전에는 예비 선수단도 함께 다룹니다.
- * @param {Object} props
- * @param {Object} props.model useWorkspaceModel 결과
- * @returns {JSX.Element}
- */
 function SubstitutionTab({ model }) {
   const [selectedTarget, setSelectedTarget] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [posFilter, setPosFilter] = useState('ALL');
 
   useEffect(() => {
     if (!feedback) return undefined;
@@ -240,18 +238,31 @@ function SubstitutionTab({ model }) {
 
   const selectedFieldSlot = selectedTarget?.kind === 'field' ? model.starters[selectedTarget.slotIndex] : null;
 
-  /**
-   * 필드/벤치/예비 항목 클릭: 첫 클릭은 선택, 두 번째 클릭은 조합에 따라 위치 스왑 / 교체 / 벤치 변경을 즉시 실행합니다.
-   * @param {{kind:'field', slotIndex:number}|{kind:'bench'|'reserve', id:string}} target
-   * @returns {void}
-   */
+  // [요구사항 20 반영] 벤치 및 예비 선수 포지션별 필터링 및 OVR 높은순 정렬
+  const filteredBench = useMemo(
+    () =>
+      [...model.bench]
+        .filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
+        .sort((a, b) => (b.overall || getOverall(b)) - (a.overall || getOverall(a))),
+    [model.bench, posFilter]
+  );
+
+  const filteredReserve = useMemo(
+    () =>
+      [...model.reserve]
+        .filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
+        .sort((a, b) => (b.overall || getOverall(b)) - (a.overall || getOverall(a))),
+    [model.reserve, posFilter]
+  );
+
   const handleSelect = (target) => {
     const current = selectedTarget;
     if (!current) {
       setSelectedTarget(target);
       return;
     }
-    const sameItem = current.kind === target.kind && (current.kind === 'field' ? current.slotIndex === target.slotIndex : current.id === target.id);
+    const sameItem =
+      current.kind === target.kind && (current.kind === 'field' ? current.slotIndex === target.slotIndex : current.id === target.id);
     if (sameItem) {
       setSelectedTarget(null);
       return;
@@ -275,12 +286,28 @@ function SubstitutionTab({ model }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-slate-400">
-        필드 선수 두 명을 차례로 클릭하면 <b className="text-emerald-300">교체 카드 소모 없이 위치만 맞교환</b>되고, 필드 선수와 벤치 선수를 클릭하면
-        {model.isLive ? <b className="text-purple-300"> 교체 카드 1장</b> : <b className="text-purple-300"> 경기 전이라 횟수 제한 없이</b>}
-        {model.isLive ? '이 소모됩니다.' : ' 교체됩니다.'} 퇴장 공석 슬롯도 선택해 생존 선수를 이동시킬 수 있습니다.
-        {!model.isLive && ' 예비 선수단과 벤치 선수를 클릭하면 경기 엔트리(벤치 7명)가 바뀝니다.'}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-slate-400">
+          필드 선수 2명 클릭 시 <b className="text-emerald-300">위치 맞교환</b>, 필드 선수와 벤치 선수 클릭 시{' '}
+          <b className="text-purple-300">즉시 교체</b>됩니다.
+        </p>
+        <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1">
+          <span className="px-2 text-[10px] font-bold text-slate-400">대기 선수 포지션 필터:</span>
+          {POS_FILTER_TABS.map((pos) => (
+            <button
+              key={pos}
+              type="button"
+              onClick={() => setPosFilter(pos)}
+              className={`rounded px-2 py-0.5 text-[11px] font-bold transition ${
+                posFilter === pos ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {pos === 'ALL' ? '전체' : pos}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Feedback feedback={feedback} />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -301,7 +328,9 @@ function SubstitutionTab({ model }) {
         </div>
 
         <div className="md:col-start-2 md:row-span-2 md:row-start-1 xl:col-start-2 xl:row-span-1">
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">{model.isLive ? '출전 중인 필드 11명' : '선발 11명'}</h3>
+          <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+            {model.isLive ? '출전 중인 필드 11명' : '선발 11명'}
+          </h3>
           <ul className="space-y-1.5">
             {model.starters.map((p) => (
               <li key={p.id}>
@@ -316,19 +345,19 @@ function SubstitutionTab({ model }) {
           </ul>
         </div>
 
-        <div className="md:col-start-1 md:row-start-2 xl:col-start-3 xl:row-start-1">
+        <div className="md:col-start-1 md:row-start-2 xl:col-start-3 xl:row-span-1">
           <h3 className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
-            <span>벤치 {model.bench.length}명</span>
+            <span>벤치 ({filteredBench.length}명)</span>
             {model.isLive ? (
               <span className="text-purple-300">
                 남은 교체 {model.subsLeft}/{MATCH_RULES.MAX_SUBSTITUTIONS}
               </span>
             ) : (
-              <span className="text-emerald-300">경기 전 · 교체 무제한</span>
+              <span className="text-emerald-300">OVR 높은순 정렬됨</span>
             )}
           </h3>
           <ul className="space-y-1.5">
-            {model.bench.map((p) => (
+            {filteredBench.map((p) => (
               <li key={p.id}>
                 <BenchCard
                   player={p}
@@ -338,14 +367,16 @@ function SubstitutionTab({ model }) {
                 />
               </li>
             ))}
-            {model.bench.length === 0 && <li className="py-3 text-center text-xs text-slate-500">벤치 선수가 없습니다.</li>}
+            {filteredBench.length === 0 && <li className="py-3 text-center text-xs text-slate-500">해당 포지션의 벤치 선수가 없습니다.</li>}
           </ul>
 
           {model.reserve.length > 0 && (
             <>
-              <h3 className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-400">예비 선수단 {model.reserve.length}명 (경기 엔트리 제외)</h3>
+              <h3 className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-400">
+                예비 선수단 ({filteredReserve.length}명 · OVR 높은순)
+              </h3>
               <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                {model.reserve.map((p) => (
+                {filteredReserve.map((p) => (
                   <li key={p.id}>
                     <BenchCard
                       player={p}
@@ -364,12 +395,6 @@ function SubstitutionTab({ model }) {
   );
 }
 
-/**
- * 탭 2: 포메이션 + 팀 세부 전술 5종 + 실시간 효과 요약.
- * @param {Object} props
- * @param {Object} props.model
- * @returns {JSX.Element}
- */
 function TeamTacticsTab({ model }) {
   const [feedback, setFeedback] = useState(null);
   const effects = summarizeTacticEffects(model.tactics);
@@ -434,36 +459,36 @@ function TeamTacticsTab({ model }) {
   );
 }
 
-/**
- * 지침의 체력 소모 배율 뱃지.
- * @param {Object} props
- * @param {number} props.staminaMul
- * @returns {JSX.Element}
- */
 function StaminaEffectBadge({ staminaMul }) {
   const pct = Math.round((staminaMul - 1) * 100);
   if (pct < 0) {
-    return <span className="whitespace-nowrap rounded-full border border-emerald-500/60 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">체력 절약 {pct}%</span>;
+    return (
+      <span className="whitespace-nowrap rounded-full border border-emerald-500/60 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300">
+        체력 절약 {pct}%
+      </span>
+    );
   }
   if (pct > 0) {
-    return <span className="whitespace-nowrap rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">체력 소모 주의 +{pct}%</span>;
+    return (
+      <span className="whitespace-nowrap rounded-full border border-amber-500/60 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+        체력 소모 주의 +{pct}%
+      </span>
+    );
   }
-  return <span className="whitespace-nowrap rounded-full border border-slate-600 bg-slate-700/40 px-2 py-0.5 text-[10px] font-bold text-slate-300">체력 소모 보통</span>;
+  return (
+    <span className="whitespace-nowrap rounded-full border border-slate-600 bg-slate-700/40 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+      체력 소모 보통
+    </span>
+  );
 }
 
-/**
- * 탭 3: 선발 11명의 현재 슬롯에 맞는 개인 지침 선택 + 예상 체력 소모 배지.
- * @param {Object} props
- * @param {Object} props.model
- * @returns {JSX.Element}
- */
 function InstructionsTab({ model }) {
   const [feedback, setFeedback] = useState(null);
 
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-slate-400">
-        지침은 현재 배치된 포지션에 맞춰 제공되며, 포지션을 바꾸면 맞지 않는 지침은 기본값으로 초기화됩니다. 분당 소모량은 포지션 x 팀 전술(템포/압박) x 지침을 모두 반영한 예상치입니다.
+        지침은 현재 배치된 포지션에 맞춰 제공되며, 포지션을 바꾸면 맞지 않는 지침은 기본값으로 초기화됩니다.
       </p>
       <Feedback feedback={feedback} />
       <ul className="grid grid-cols-1 gap-2 xl:grid-cols-2">
@@ -519,21 +544,18 @@ function InstructionsTab({ model }) {
   );
 }
 
-/**
- * 경기 중/하프타임/경기 전 로비/스쿼드 화면에서 공통으로 쓰는 통합 전술 작업대.
- * 3개 탭: [1. 포지션 변경 & 선수 교체] [2. 팀 세부 전술] [3. 선수 개인 지침].
- * source 에 따라 라이브 경기 스토어 또는 경기 전 스쿼드 스토어에 동일한 UI 로 연결되며, 모든 변경은 즉시 해당 스토어에 반영됩니다.
- * @param {Object} props
- * @param {'live'|'squad'} props.source 데이터 출처
- * @returns {JSX.Element|null}
- */
 export default function TacticsWorkspace({ source }) {
   const model = useWorkspaceModel(source);
   const [tab, setTab] = useState('swap');
   if (!model) return null;
 
   const tabs = [
-    { id: 'swap', label: model.isLive ? `🔄 포지션 변경 & 선수 교체 (남은 교체: ${model.subsLeft}/${MATCH_RULES.MAX_SUBSTITUTIONS})` : '🔄 포지션 변경 & 선수 교체' },
+    {
+      id: 'swap',
+      label: model.isLive
+        ? `🔄 포지션 변경 & 선수 교체 (남은 교체: ${model.subsLeft}/${MATCH_RULES.MAX_SUBSTITUTIONS})`
+        : '🔄 포지션 변경 & 선수 교체',
+    },
     { id: 'team', label: '📋 팀 세부 전술' },
     { id: 'instructions', label: '🎯 선수 개인 지침' },
   ];

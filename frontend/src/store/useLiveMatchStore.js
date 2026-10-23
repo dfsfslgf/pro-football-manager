@@ -28,7 +28,7 @@ import { errorMessage } from '../api/client.js';
 
 const WEATHER_TYPES = [
   { code: 'SUNNY', label: '☀️ 맑음 (쾌적한 잔디)', passMod: 1.0, speedMod: 1.0, staminaMod: 1.0, longShotMod: 1.0 },
-  { code: 'RAINY', label: '🌧️ 우천 (미끄러운 잔디 · 중거리슛 위력↑, 패스 정확도↓)', passMod: 0.91, speedMod: 0.94, staminaMod: 1.12, longShotMod: 1.18 },
+  { code: 'RAINY', label: '🌧️ 우천 (미끄러운 잔디 · 슬라이딩 태클 빈도↑)', passMod: 0.92, speedMod: 0.95, staminaMod: 1.1, longShotMod: 1.15 },
   { code: 'WINDY', label: '💨 강풍 (롱패스 변칙 궤적)', passMod: 0.95, speedMod: 0.98, staminaMod: 1.04, longShotMod: 1.08 },
   { code: 'NIGHT_CLEAR', label: '🌙 야간 경기 (최상의 집중력)', passMod: 1.03, speedMod: 1.02, staminaMod: 0.97, longShotMod: 1.02 },
 ];
@@ -96,7 +96,7 @@ export function buildFieldTeam({ side, clubId, name, emblem, formation, starters
   const matchState = {
     yellowCards: 0,
     isSentOff: false,
-     isInjured: false,
+    isInjured: false,
     goals: 0,
     assists: 0,
     minutesPlayed: 0,
@@ -106,7 +106,7 @@ export function buildFieldTeam({ side, clubId, name, emblem, formation, starters
     saves: 0,
     tackles: 0,
     passesCompleted: 0,
-    morale: 75, // 심리 상태 (0~100: 자신감/집중력)
+    morale: 75,
   };
   const builtStarters = starters.map((p, i) => {
     const slot = slots[i] || { baseX: 50, baseY: 50, label: 'CM', role: 'MF' };
@@ -254,7 +254,7 @@ function midfieldPower(team) {
 
 function possessionPower(team) {
   const t = team.tactics;
-  const ovrFactor = Math.pow((team.avgOvr || 75) / 75, 2.2); // OVR 90팀 vs 50팀 점유율 격차 확실히 반영
+  const ovrFactor = Math.pow((team.avgOvr || 75) / 75, 2.2);
   return (
     midfieldPower(team) *
     ovrFactor *
@@ -345,64 +345,6 @@ function runAiPlanB(team, opponent, minute, events) {
   }
 }
 
-function processFoulAndRefereeScene(attacker, defender, minute, events, action) {
-  defender.stats.fouls++;
-  action.eventType = 'FOUL';
-  const fouler = randomPick(aliveOf(defender).filter((p) => p.slotRoleGroup === 'DF' || p.slotRoleGroup === 'MF'));
-  if (!fouler) return;
-  action.foulerId = fouler.id;
-
-  // 오프사이드 또는 핸드볼/세트피스 판정 분기
-  const refRoll = Math.random();
-  if (refRoll < 0.22) {
-    attacker.stats.offsides = (attacker.stats.offsides || 0) + 1;
-    const fw = randomPick(aliveOf(attacker).filter((p) => p.slotRoleGroup === 'FW')) || aliveOf(attacker)[0];
-    events.push(makeInfoEvent(minute, `🚩 [부심 깃발] ${attacker.name}의 ${getSafeName(fw)} 선수, 간발의 차이로 오프사이드가 선언됩니다.`));
-    return;
-  }
-
-  // 경미한 부상(타박상) 발생 체크 (체력 및 스피드 소폭 저하)
-  if (Math.random() < 0.08) {
-    const victim = randomPick(aliveOf(attacker).filter((p) => p.slotRoleGroup !== 'GK'));
-    if (victim) {
-      victim.currentStamina = Math.max(15, victim.currentStamina - 14);
-      victim.isInjured = true;
-      events.push(
-        makeInfoEvent(minute, `🚑 [부상 주의] 거친 충돌로 ${getSafeName(victim)}(${attacker.name}) 선수가 통증을 호소합니다! 체력과 기동력이 저하됩니다.`)
-      );
-    }
-  }
-
-  // 위험 지역 프리킥 또는 페널티킥(VAR 판독 포함) 부여
-  if (refRoll > 0.78) {
-    attacker.stats.freeKicks = (attacker.stats.freeKicks || 0) + 1;
-    action.setPieceType = 'FREE_KICK';
-    action.attackingTeam = attacker.side;
-  }
-
-  if (Math.random() >= MATCH_RULES.CARD_CHANCE * (defender.talkEffect?.cardMul || 1)) return;
-  fouler.yellowCards++;
-  defender.stats.yellowCards++;
-  action.eventType = 'CARD';
-  action.cardPlayerId = fouler.id;
-  if (fouler.yellowCards === 1) {
-    action.cardType = 'YELLOW';
-    fouler.morale = Math.max(40, (fouler.morale || 75) - 8);
-    events.push(makeEvent(minute, 'YELLOW_CARD', defender, fouler, null, `🟨 주심이 ${getSafeName(fouler)} 선수에게 경고를 선언합니다.`));
-  } else {
-    fouler.isSentOff = true;
-    defender.stats.redCards++;
-    action.cardType = 'RED';
-    events.push(
-      makeEvent(minute, 'RED_CARD', defender, fouler, null, `🟥 경고 누적 퇴장! ${getSafeName(fouler)} 선수가 그라운드를 떠납니다!`)
-    );
-  }
-}
-
-/**
- * [핵심 개편] 스토어는 점유율, 체력, 반칙, 전술 변화, 세트피스 기회만 조율하며,
- * 실제 슈팅과 골은 2D 캔버스 물리 엔진과 단일 파이프라인으로만 발생시켜 이중 슈팅/야구 스코어를 원천 차단합니다.
- */
 export function simulateSingleMinuteTick(home, away, minute, weather) {
   const events = [];
   const weatherMod = weather?.staminaMod || 1.0;
@@ -416,7 +358,6 @@ export function simulateSingleMinuteTick(home, away, minute, weather) {
   const pHome = Math.max(0.2, Math.min(0.8, 0.5 + (rawHome - 0.5) * MATCH_RULES.POSSESSION_SENSITIVITY));
   const homeAttacks = Math.random() < pHome;
   const attacker = homeAttacks ? home : away;
-  const defender = homeAttacks ? away : home;
   attacker.stats.possessionTicks++;
 
   const action = {
@@ -432,26 +373,18 @@ export function simulateSingleMinuteTick(home, away, minute, weather) {
     subInId: null,
   };
 
-  const foulChance = MATCH_RULES.FOUL_SCENE_CHANCE * getTacticEffect(defender.tactics, 'pressing').foulMul;
-  const roll = Math.random();
-  if (roll < foulChance) {
-    processFoulAndRefereeScene(attacker, defender, minute, events, action);
-  } else if (roll < foulChance + 0.045) {
-    // 간헐적 코너킥/스로인 세트피스 연출 트리거
+  if (Math.random() < 0.04) {
     const spRoll = Math.random();
-    if (spRoll < 0.45) {
+    if (spRoll < 0.5) {
       attacker.stats.corners++;
       action.eventType = 'SET_PIECE';
       action.setPieceType = 'CORNER';
-      events.push(makeInfoEvent(minute, `🚩 [코너킥] ${attacker.name}의 날카로운 측면 공격이 수비 맞고 나가며 코너킥 찬스를 얻습니다.`));
-    } else if (spRoll < 0.82) {
-      action.eventType = 'SET_PIECE';
-      action.setPieceType = 'THROW_IN';
+      events.push(makeInfoEvent(minute, `🚩 [코너킥] ${attacker.name}의 측면 돌파가 수비 맞고 나가며 코너킥 찬스를 얻습니다.`));
     } else {
       attacker.stats.freeKicks = (attacker.stats.freeKicks || 0) + 1;
       action.eventType = 'SET_PIECE';
       action.setPieceType = 'FREE_KICK';
-      events.push(makeInfoEvent(minute, `🎯 [프리킥 찬스] ${attacker.name}, 페널티 박스 아크 부근에서 직접 프리킥 기회를 잡습니다!`));
+      events.push(makeInfoEvent(minute, `🎯 [프리킥 찬스] ${attacker.name}, 위험 지역에서 프리킥 기회를 잡습니다.`));
     }
   }
 
@@ -550,9 +483,13 @@ function buildFinishPayload(state) {
   const { homeTeam, awayTeam } = state;
   const totalTicks = Math.max(1, homeTeam.stats.possessionTicks + awayTeam.stats.possessionTicks);
   const homePossession = Math.round((homeTeam.stats.possessionTicks / totalTicks) * 100);
+  const cleanEvents = sanitizeTimelineForServer(state.timelineEvents, homeTeam, awayTeam);
 
-  const toStats = (team, possession) => {
-    // [핵심 무결성 보장] 유효슈팅은 반드시 득점 이상이어야 하며, 전체 슈팅은 반드시 유효슈팅 이상이어야 함!
+  // 레드카드 이벤트 수와 팀 레드카드 통계를 정확히 일치시켜 서버 검증 통과 보장
+  const homeRedsCount = cleanEvents.filter((e) => e.team === 'HOME' && e.type === 'RED_CARD').length;
+  const awayRedsCount = cleanEvents.filter((e) => e.team === 'AWAY' && e.type === 'RED_CARD').length;
+
+  const toStats = (team, possession, exactRedCards) => {
     const safeShotsOnTarget = Math.max(team.score || 0, team.stats.shotsOnTarget || 0);
     const safeShots = Math.max(safeShotsOnTarget, team.stats.shots || 0);
     const passAcc =
@@ -566,7 +503,7 @@ function buildFinishPayload(state) {
       corners: team.stats.corners || 0,
       fouls: team.stats.fouls || 0,
       yellowCards: team.stats.yellowCards || 0,
-      redCards: team.stats.redCards || 0,
+      redCards: exactRedCards,
       passesAttempted: team.stats.passesAttempted || 0,
       passesCompleted: team.stats.passesCompleted || 0,
       passAccuracy: passAcc,
@@ -580,15 +517,14 @@ function buildFinishPayload(state) {
     sessionId: state.sessionId,
     scoreHome: homeTeam.score,
     scoreAway: awayTeam.score,
-    homeStats: toStats(homeTeam, homePossession),
-    awayStats: toStats(awayTeam, 100 - homePossession),
-    timelineEvents: sanitizeTimelineForServer(state.timelineEvents, homeTeam, awayTeam),
+    homeStats: toStats(homeTeam, homePossession, homeRedsCount),
+    awayStats: toStats(awayTeam, 100 - homePossession, awayRedsCount),
+    timelineEvents: cleanEvents,
     finalTactics: { ...homeTeam.tactics },
     lockerTalk: state.lockerTalk,
     playerStamina: appeared
       .filter((p) => p && p.userPlayerId > 0)
       .map((p) => {
-        // [핵심 버그 수정 #17] 선수 개인 기록에서도 shotsOnTarget >= goals, shots >= shotsOnTarget 100% 보장!
         const playerGoals = p.goals || 0;
         const validSot = Math.max(playerGoals, p.shotsOnTarget || 0);
         const validShots = Math.max(validSot, p.shots || 0);
@@ -651,7 +587,6 @@ export const useLiveMatchStore = create((set, get) => ({
 
   clearLastGoalEvent: () => set({ lastGoalEvent: null }),
 
-  // 실시간 패스 및 수비 태클 통계 반영 액션
   recordCanvasPass: (teamSide, isCompleted = true) =>
     set((state) => {
       const key = teamSide === 'HOME' ? 'homeTeam' : 'awayTeam';
@@ -692,7 +627,76 @@ export const useLiveMatchStore = create((set, get) => ({
       };
     }),
 
-  // 슈팅(유효슈팅/선방/코너킥) 기록 동기화 (득점이 아닌 일반 슈팅 전용)
+  /**
+   * [신규 핵심 액션] 캔버스에서 슬라이딩 태클 파울 및 백태클(악의성 기반 경고/다이렉트 퇴장) 발생 시 즉시 반영
+   */
+  recordCanvasFoulAndCard: ({ defenderTeamSide, foulerSlotIndex, victimName, isFromBehind, cardSeverity }) =>
+    set((state) => {
+      const minute = Math.max(1, state.minute || 1);
+      const isHomeDef = defenderTeamSide === 'HOME';
+      const defKey = isHomeDef ? 'homeTeam' : 'awayTeam';
+      const defTeam = cloneTeam(state[defKey]);
+      if (!defTeam) return {};
+
+      const fouler = defTeam.starters[foulerSlotIndex];
+      if (!fouler || fouler.isSentOff) return {};
+
+      defTeam.stats.fouls = (defTeam.stats.fouls || 0) + 1;
+      const newEvents = [];
+      const foulerName = getSafeName(fouler, '수비수');
+      const tackleDesc = isFromBehind ? '위험한 뒤쪽 백태클(Back Tackle)' : '깊숙한 슬라이딩 태클';
+
+      if (cardSeverity === 'DIRECT_RED') {
+        fouler.isSentOff = true;
+        defTeam.stats.redCards = (defTeam.stats.redCards || 0) + 1;
+        newEvents.push(
+          makeEvent(
+            minute,
+            'RED_CARD',
+            defTeam,
+            fouler,
+            null,
+            `🟥 [다이렉트 퇴장!] ${foulerName} 선수가 ${victimName || '상대 공격수'}에게 악의적인 ${tackleDesc}을 가해 주심이 지체 없이 레드카드를 꺼내듭니다!`
+          )
+        );
+      } else if (cardSeverity === 'YELLOW') {
+        fouler.yellowCards = (fouler.yellowCards || 0) + 1;
+        defTeam.stats.yellowCards = (defTeam.stats.yellowCards || 0) + 1;
+        if (fouler.yellowCards >= 2) {
+          fouler.isSentOff = true;
+          defTeam.stats.redCards = (defTeam.stats.redCards || 0) + 1;
+          newEvents.push(
+            makeEvent(
+              minute,
+              'RED_CARD',
+              defTeam,
+              fouler,
+              null,
+              `🟨🟥 [경고 누적 퇴장!] ${foulerName} 선수가 거친 ${tackleDesc}로 두 번째 옐로카드를 받고 퇴장당합니다!`
+            )
+          );
+        } else {
+          newEvents.push(
+            makeEvent(
+              minute,
+              'YELLOW_CARD',
+              defTeam,
+              fouler,
+              null,
+              `🟨 [경고] ${foulerName} 선수, 돌파하던 ${victimName || '상대 선수'}를 향한 ${tackleDesc} 반칙으로 옐로카드를 받습니다.`
+            )
+          );
+        }
+      } else {
+        newEvents.push(makeInfoEvent(minute, `📢 [파울] ${defTeam.name} ${foulerName} 선수의 슬라이딩 태클 반칙이 선언됩니다.`));
+      }
+
+      return {
+        [defKey]: defTeam,
+        timelineEvents: [...(state.timelineEvents || []), ...newEvents],
+      };
+    }),
+
   recordCanvasShot: (teamSide, isOnTarget = true, shooterSlotIndex = null, resultText = null) =>
     set((state) => {
       const isHome = teamSide === 'HOME';
@@ -743,15 +747,9 @@ export const useLiveMatchStore = create((set, get) => ({
       };
     }),
 
-  // [핵심] 실제 골이 들어갔을 때 호출 (득점 + 슈팅 + 유효슈팅 동시 증가 보장 & 쿨다운 적용)
   recordActualCanvasGoal: ({ teamSide, shooterSlotIndex, scorerName, assisterSlotIndex, assisterName, goalStyle = 'NORMAL' }) =>
     set((state) => {
-      const minute = state.minute || 1;
-      // [연속골/야구스코어 원천 차단] 직전 골 이후 최소 3분(게임 시간) 이내면 중복 득점 무효 처리!
-      if (minute - (state.lastGoalMinute ?? -10) < 3 && state.lastGoalMinute > 0) {
-        return {};
-      }
-
+      const minute = Math.max(1, state.minute || 1);
       const isHome = teamSide === 'HOME';
       const activeTeam = isHome ? state.homeTeam : state.awayTeam;
       const otherTeam = isHome ? state.awayTeam : state.homeTeam;
@@ -776,15 +774,6 @@ export const useLiveMatchStore = create((set, get) => ({
       const realAssisterId = realAssister ? (realAssister.userPlayerId ?? realAssister.playerId ?? realAssister.id) : null;
       const realAssisterName = realAssister ? getSafeName(realAssister, null) : null;
 
-      // VAR 판독 연출 (약 12% 확률로 VAR 온필드 리뷰 후 득점 인정 로그 추가)
-      const varLogs = [];
-      if (Math.random() < 0.12) {
-        varLogs.push(
-          makeInfoEvent(minute, `📺 [VAR 판독 완료] 주심이 오프사이드 및 파울 여부를 교신 확인한 끝에 ${realScorerName} 선수의 정당한 득점으로 최종 선언합니다!`)
-        );
-      }
-
-      // [무결성 보장] 골 기록 시 해당 선수의 goals +1 뿐만 아니라 shots +1, shotsOnTarget +1도 함께 증가!
       const updatedStarters = starters.map((p) => {
         if (!p) return p;
         if (p === realScorer) {
@@ -820,9 +809,7 @@ export const useLiveMatchStore = create((set, get) => ({
           : goalStyle === 'LONG_SHOT'
           ? '환상적인 중거리 대포알 원더골!'
           : goalStyle === 'TIKI_TAKA'
-          ? '티키타카 패스 워크로 수비 라인을 허문 뒤 침착한 마무리!'
-          : goalStyle === 'SET_PIECE'
-          ? '세트피스 찬스에서 정교한 득점!'
+          ? '티키타카 패스 워크에 이은 마무리!'
           : '날카로운 침투에 이은 마무리 슈팅 득점!';
 
       const goalEvt = {
@@ -844,14 +831,14 @@ export const useLiveMatchStore = create((set, get) => ({
         scoreHome: newHomeScore,
         scoreAway: newAwayScore,
         description: realAssisterName
-          ? `⚽ [${minute}'] [${styleLabel}] ${realAssisterName}의 킬패스를 이어받은 ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 골망을 흔듭니다!`
-          : `⚽ [${minute}'] [${styleLabel}] ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 폭발적인 마무리로 득점합니다!`,
+          ? `⚽ [${minute}'] [${styleLabel}] ${realAssisterName}의 패스를 받은 ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 골망을 흔듭니다!`
+          : `⚽ [${minute}'] [${styleLabel}] ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 단독 돌파 후 득점합니다!`,
       };
 
       const updatedTeamStats = {
         ...activeTeam.stats,
-        shots: Math.max((activeTeam.stats?.shots || 0) + 1, ( isHome ? newHomeScore : newAwayScore )),
-        shotsOnTarget: Math.max((activeTeam.stats?.shotsOnTarget || 0) + 1, ( isHome ? newHomeScore : newAwayScore )),
+        shots: Math.max((activeTeam.stats?.shots || 0) + 1, isHome ? newHomeScore : newAwayScore),
+        shotsOnTarget: Math.max((activeTeam.stats?.shotsOnTarget || 0) + 1, isHome ? newHomeScore : newAwayScore),
       };
 
       const updatedActiveTeam = {
@@ -874,7 +861,7 @@ export const useLiveMatchStore = create((set, get) => ({
         homeTeam: isHome ? updatedActiveTeam : updatedOtherTeam,
         awayTeam: !isHome ? updatedActiveTeam : updatedOtherTeam,
         lastGoalEvent: goalEvt,
-        timelineEvents: [...(state.timelineEvents || []), ...varLogs, goalEvt],
+        timelineEvents: [...(state.timelineEvents || []), goalEvt],
       };
     }),
 

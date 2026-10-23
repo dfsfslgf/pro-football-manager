@@ -13,42 +13,44 @@ import TacticsWorkspace from '../components/domain/squad/TacticsWorkspace.jsx';
 import { MODE_META } from '../constants/gameConfig.js';
 import { TEAM_TACTIC_GROUPS, TEAM_TACTIC_LABELS } from '../constants/tacticsConfig.js';
 
-/**
- * 상대 팀 브리핑 카드: 엠블럼/이름/전력/포메이션/전술과 선발 11명 요약.
- * @param {Object} props
- * @param {Object} props.opponent 서버 opponent 객체
- * @returns {JSX.Element}
- */
 function OpponentCard({ opponent }) {
   return (
-    <Panel title="상대 팀 브리핑">
+    <Panel title="상대 팀 전력 브리핑">
       <div className="flex items-center gap-3">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-600/20 text-2xl">{opponent.emblem}</span>
+        <span className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-600/20 text-2xl">
+          {opponent.emblem}
+        </span>
         <div>
           <p className="text-base font-black text-white" data-testid="opponent-name">
             {opponent.name}
           </p>
           <p className="text-xs text-slate-400">
-            전력 {opponent.strength} · {opponent.formation}
+            팀 평균 전력(OVR) <b className="text-emerald-300">{opponent.strength}</b> · 포메이션{' '}
+            <b className="text-white">{opponent.formation}</b>
           </p>
         </div>
       </div>
-      <ul className="mt-3 space-y-1 text-[11px] text-slate-300">
+      <ul className="mt-3 space-y-1 rounded-xl bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
         {TEAM_TACTIC_GROUPS.map((g) => (
           <li key={g.key} className="flex justify-between">
             <span className="text-slate-500">{g.label}</span>
-            <span className="font-semibold">{TEAM_TACTIC_LABELS[g.key][opponent.tactics[g.key]]}</span>
+            <span className="font-semibold text-slate-200">{TEAM_TACTIC_LABELS[g.key][opponent.tactics[g.key]]}</span>
           </li>
         ))}
       </ul>
-      <h4 className="mb-1 mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">주요 선수</h4>
-      <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-slate-300">
+      <h4 className="mb-1.5 mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        상대 선발 베스트 11 (실제 로스터 & 능력치)
+      </h4>
+      <ul className="space-y-1 text-[11px] text-slate-300">
         {opponent.starters.map((p) => (
-          <li key={p.userPlayerId} className="flex justify-between">
-            <span className="truncate">{p.name}</span>
-            <span className="text-slate-500">
-              {p.mainPosition} {p.overall}
+          <li key={p.userPlayerId} className="flex items-center justify-between rounded bg-slate-900/70 px-2 py-1">
+            <span className="truncate font-semibold text-white">
+              <span className="mr-1.5 inline-block w-7 rounded bg-slate-800 text-center text-[10px] font-bold text-rose-300">
+                {p.preferredRoleCode || p.mainPosition}
+              </span>
+              {p.name}
             </span>
+            <span className="shrink-0 font-black text-emerald-300">OVR {p.overall || opponent.strength}</span>
           </li>
         ))}
       </ul>
@@ -56,15 +58,12 @@ function OpponentCard({ opponent }) {
   );
 }
 
-/**
- * 경기 전 로비: 상대 팀/시나리오 브리핑과 스쿼드 화면과 동일한 전술 작업대(포메이션, 선발/벤치 교체, 위치 스왑,
- * 팀 세부 전술, 개인 지침)를 제공하고, [라인업 저장 및 경기장 입장 (Kick Off)] 으로 서버 경기 세션을 발급받아 라이브 경기를 시작합니다.
- * @returns {JSX.Element|null}
- */
 export default function PreMatchLobbyPage() {
   const pending = useCompetitionStore((s) => s.pending);
+  const selectedWorldCupNation = useCompetitionStore((s) => s.selectedWorldCupNation);
   const club = useAuthStore((s) => s.club);
   const user = useAuthStore((s) => s.user);
+  const params = useNavStore((s) => s.params);
   const loaded = useSquadStore((s) => s.loaded);
   const go = useNavStore((s) => s.go);
   const [notice, setNotice] = useState(null);
@@ -80,10 +79,11 @@ export default function PreMatchLobbyPage() {
   const { opponent, scenario } = next;
   const meta = MODE_META[mode];
 
-  /**
-   * 라인업을 저장하고 서버 경기 세션을 발급받아 라이브 경기를 시작합니다.
-   * @returns {Promise<void>}
-   */
+  // 월드컵 모드일 경우 선택한 국가대표팀 이름/엠블럼 적용 (요구사항 6 반영)
+  const wcNation = params?.nation || selectedWorldCupNation;
+  const displayHomeName = mode === 'WORLD_CUP' && wcNation ? `${wcNation.name} 대표팀` : club.name;
+  const displayHomeEmblem = mode === 'WORLD_CUP' && wcNation?.emblem ? wcNation.emblem : club.emblemIcon;
+
   const handleKickOff = async () => {
     setBusy(true);
     setNotice(null);
@@ -108,8 +108,8 @@ export default function PreMatchLobbyPage() {
       useLiveMatchStore.getState().initMatch({
         home: {
           clubId: user.id,
-          name: club.name,
-          emblem: club.emblemIcon,
+          name: displayHomeName,
+          emblem: displayHomeEmblem,
           formation: squad.formation,
           tactics: squad.teamTactics,
           starters: squad.starters,
@@ -130,9 +130,13 @@ export default function PreMatchLobbyPage() {
   return (
     <div className="space-y-4" data-testid="prematch-page">
       <Panel
-        title={`${meta.icon} ${next.label}`}
+        title={`${meta.icon} ${next.label} (${displayHomeName} vs ${opponent.name})`}
         right={
-          <button type="button" onClick={() => go('modes', { mode })} className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-white">
+          <button
+            type="button"
+            onClick={() => go('modes', { mode })}
+            className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-white"
+          >
             <ArrowLeft className="h-3.5 w-3.5" /> 모드 선택으로
           </button>
         }
@@ -147,7 +151,9 @@ export default function PreMatchLobbyPage() {
             </p>
           </div>
         ) : (
-          <p className="text-xs text-slate-400">전술을 점검하고 킥오프를 눌러 경기장에 입장하세요. 경기 중에도 전술/교체를 바꿀 수 있습니다.</p>
+          <p className="text-xs text-slate-400">
+            상대 팀의 포메이션과 주요 선수를 확인한 뒤 전술을 점검하고 킥오프를 눌러 경기장에 입장하세요.
+          </p>
         )}
       </Panel>
 
@@ -155,7 +161,7 @@ export default function PreMatchLobbyPage() {
         <div className="xl:col-span-1">
           <OpponentCard opponent={opponent} />
         </div>
-        <Panel title="내 라인업 · 전술" className="xl:col-span-3">
+        <Panel title="내 라인업 · 전술 점검" className="xl:col-span-3">
           {loaded ? (
             <TacticsWorkspace source="squad" />
           ) : (

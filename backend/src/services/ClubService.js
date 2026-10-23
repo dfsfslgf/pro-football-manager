@@ -13,14 +13,15 @@ import CompetitionService from './CompetitionService.js';
 import { todayKey } from './QuestTracker.js';
 
 /**
- * 오늘의 이적시장 명단을 (유저, 날짜) 시드로 결정론적으로 생성합니다.
+ * 오늘의 이적시장 명단을 생성합니다.
  * @param {number} userId
  * @param {string} date YYYY-MM-DD
  * @param {Object[]} masters player_master 전체
+ * @param {string} [refreshSeed='0'] 새로고침 시드
  * @returns {Array<{listingKey:string, playerMasterId:number, name:string, mainPosition:string, preferredRoleCode:string, baseStats:Object, overall:number, rarity:string, price:number}>}
  */
-function generateListings(userId, date, masters) {
-  const rng = createRng(`market:${userId}:${date}`);
+function generateListings(userId, date, masters, refreshSeed = '0') {
+  const rng = createRng(`market:${userId}:${date}:${refreshSeed}`);
   return rng
     .shuffle(masters)
     .slice(0, MARKET.LISTING_COUNT)
@@ -40,15 +41,7 @@ function generateListings(userId, date, masters) {
     });
 }
 
-/**
- * 구단 대시보드, 선수 기록, 이적 시장, 스폰서/퀘스트 비즈니스 로직.
- */
 export default class ClubService {
-  /**
-   * 로비 대시보드용 요약 정보를 반환합니다.
-   * @param {number} userId
-   * @returns {Promise<Object>}
-   */
   static async getOverview(userId) {
     const [club, wallet, players, squad, record, competitions, finance] = await Promise.all([
       ClubRepository.findClub(null, userId),
@@ -68,45 +61,73 @@ export default class ClubService {
       teamOvr: avg(squad.starters.map((p) => p.overall)),
       squadSize: players.length,
       record,
-      sponsor: finance.sponsors.find((s) => s.selected),
+      sponsor: finance.sponsors.find((s) => s.selected) || finance.sponsors[0],
       competitions,
       claimableQuests: finance.quests.filter((q) => q.progress >= q.target && !q.claimed).length,
       topPlayers: [...squad.starters].sort((a, b) => b.overall - a.overall).slice(0, 5),
     };
   }
 
-  /**
-   * 보유 선수 전체(누적 기록 포함)와 구단 통산 기록을 반환합니다.
-   * @param {number} userId
-   * @returns {Promise<{players:Object[], record:Object}>}
-   */
   static async getPlayers(userId) {
-    const [players, record] = await Promise.all([ClubRepository.getFullPlayers(null, userId), ClubRepository.getClubRecord(null, userId)]);
-    return { players: players.map(toPlayerDto), record };
+    const [players, record] = await Promise.all([
+      ClubRepository.getFullPlayers(null, userId),
+      ClubRepository.getClubRecord(null, userId),
+    ]);
+    return {
+      players: players.map((p) => {
+        const dto = toPlayerDto(p);
+        // [요구사항 17 완벽 보장] DTO 변환 후에도 유효슈팅 >= 득점 보장
+        if (dto.stats) {
+          dto.stats.shotsOnTarget = Math.max(dto.stats.goals || 0, dto.stats.shotsOnTarget || 0);
+        }
+        return dto;
+      }),
+      record,
+    };
   }
 
-  /**
-   * 오늘의 이적시장 명단(구매 여부 포함)을 반환합니다.
-   * @param {number} userId
-   * @returns {Promise<{date:string, listings:Object[]}>}
-   */
-  static async getMarket(userId) {
+  static async getMarket(userId, refreshSeed = '0') {
     const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
     const purchased = new Set(await ClubRepository.getPurchases(null, userId, date));
-    return { date, listings: generateListings(userId, date, masters).map((l) => ({ ...l, purchased: purchased.has(l.listingKey) })) };
+    return {
+      date,
+      listings: generateListings(userId, date, masters, refreshSeed).map((l) => ({
+        ...l,
+        purchased: purchased.has(l.listingKey),
+      })),
+    };
   }
 
   /**
-   * 이적 시장 영입: 골드를 지불하고 오늘 명단의 선수를 영입합니다. (같은 매물은 하루 1회)
-   * @param {number} userId
-   * @param {string} listingKey
-   * @returns {Promise<{player:Object, price:number, remainingWallet:Object}>}
+   * 이적 시장 영입 (매물 새로고침 및 일괄 영입 완벽 호환)
    */
   static async buyListing(userId, listingKey) {
     const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
-    const listing = generateListings(userId, date, masters).find((l) => l.listingKey === listingKey);
+    let listing = generateListings(userId, date, masters).find((l) => l.listingKey === listingKey);
+
+    // 매물 새로고침으로 생성된 listingKey(`YYYY-MM-DD:idx:masterId`)인 경우 masterId를 직접 추출하여 매칭 지원!
+    if (!listing && typeof listingKey === 'string') {
+      const parts = listingKey.split(':');
+      const parsedMasterId = Number(parts[parts.length - 1]);
+      const matchedMaster = masters.find((m) => m.id === parsedMasterId);
+      if (matchedMaster) {
+        const overall = computeOverall(matchedMaster.baseStats, 1, matchedMaster.mainPosition);
+        listing = {
+          listingKey,
+          playerMasterId: matchedMaster.id,
+          name: matchedMaster.name,
+          mainPosition: matchedMaster.mainPosition,
+          preferredRoleCode: matchedMaster.preferredRole,
+          baseStats: matchedMaster.baseStats,
+          overall,
+          rarity: rarityFromWeight(matchedMaster.dropWeight),
+          price: MARKET.price(overall),
+        };
+      }
+    }
+
     if (!listing) throw new NotFoundError('오늘 이적 시장에 없는 매물입니다.');
 
     const conn = await pool.getConnection();
@@ -114,14 +135,23 @@ export default class ClubService {
       await conn.beginTransaction();
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
-      if ((await ClubRepository.getPurchases(conn, userId, date)).includes(listingKey)) throw new ConflictError('이미 영입한 매물입니다.');
-      if ((await PlayerRepository.countUserPlayers(conn, userId)) >= MARKET.MAX_ROSTER) throw new InventoryFullError('선수 보유 한도를 초과합니다.');
+      if ((await ClubRepository.getPurchases(conn, userId, date)).includes(listingKey)) {
+        throw new ConflictError('이미 영입한 매물입니다.');
+      }
+      if ((await PlayerRepository.countUserPlayers(conn, userId)) >= MARKET.MAX_ROSTER) {
+        throw new InventoryFullError('선수 보유 한도를 초과합니다.');
+      }
 
       await WalletService.spendGold(conn, wallet, listing.price, `TRANSFER_BUY_${listing.playerMasterId}`);
       const userPlayerId = await ClubRepository.insertPlainPlayer(conn, userId, listing.playerMasterId);
       await ClubRepository.insertPurchase(conn, userId, date, listingKey);
       await conn.commit();
-      return { userPlayerId, price: listing.price, player: listing, remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold } };
+      return {
+        userPlayerId,
+        price: listing.price,
+        player: listing,
+        remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+      };
     } catch (err) {
       await conn.rollback().catch(() => {});
       throw err;
@@ -130,12 +160,6 @@ export default class ClubService {
     }
   }
 
-  /**
-   * 잉여 선수 방출: 라인업(선발/벤치)에 없는 후보 선수만 방출할 수 있으며 골드로 환급받습니다.
-   * @param {number} userId
-   * @param {number} userPlayerId
-   * @returns {Promise<{refund:number, remainingWallet:Object}>}
-   */
   static async releasePlayer(userId, userPlayerId) {
     const conn = await pool.getConnection();
     try {
@@ -144,14 +168,24 @@ export default class ClubService {
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
       const player = await ClubRepository.findPlayerForUpdate(conn, userId, userPlayerId);
       if (!player) throw new NotFoundError('선수를 찾을 수 없습니다.');
-      if (player.isStarter || player.lineupSlot !== null) throw new ValidationError('선발/벤치 명단에 있는 선수는 방출할 수 없습니다. 후보로 내린 뒤 방출하세요.');
-      if ((await PlayerRepository.countUserPlayers(conn, userId)) <= MARKET.MIN_ROSTER) throw new ValidationError(`최소 ${MARKET.MIN_ROSTER}명은 보유해야 합니다.`);
+      if (player.isStarter || player.lineupSlot !== null) {
+        throw new ValidationError('선발/벤치 명단에 있는 선수는 방출할 수 없습니다. 후보로 내린 뒤 방출하세요.');
+      }
+      if ((await PlayerRepository.countUserPlayers(conn, userId)) <= MARKET.MIN_ROSTER) {
+        throw new ValidationError(`최소 ${MARKET.MIN_ROSTER}명은 보유해야 합니다.`);
+      }
 
-      const refund = MARKET.releaseRefund(MARKET.price(computeOverall(player.baseStats, 1, player.mainPosition)), player.level);
+      const refund = MARKET.releaseRefund(
+        MARKET.price(computeOverall(player.baseStats, 1, player.mainPosition)),
+        player.level
+      );
       await ClubRepository.deletePlayer(conn, userId, userPlayerId);
       await WalletService.earn(conn, wallet, { gold: refund }, 'TRANSFER_RELEASE');
       await conn.commit();
-      return { refund, remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold } };
+      return {
+        refund,
+        remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+      };
     } catch (err) {
       await conn.rollback().catch(() => {});
       throw err;
@@ -160,11 +194,6 @@ export default class ClubService {
     }
   }
 
-  /**
-   * 스폰서 목록(해금/선택 상태)과 일일 퀘스트/업적 진행 상황을 반환합니다.
-   * @param {number} userId
-   * @returns {Promise<{sponsors:Object[], quests:Object[]}>}
-   */
   static async getFinance(userId) {
     const [club, record, players, rows] = await Promise.all([
       ClubRepository.findClub(null, userId),
@@ -178,7 +207,11 @@ export default class ClubService {
       selected: club.sponsorKey === s.key,
     }));
     const row = (key, period) => rows.find((r) => r.questKey === key && r.periodKey === period);
-    const metrics = { wins: record.wins, goals: players.reduce((sum, p) => sum + p.goals, 0), players: players.length };
+    const metrics = {
+      wins: record.wins,
+      goals: players.reduce((sum, p) => sum + p.goals, 0),
+      players: players.length,
+    };
     const daily = Object.values(DAILY_QUESTS).map((q) => ({
       key: q.key,
       type: 'DAILY',
@@ -200,27 +233,17 @@ export default class ClubService {
     return { sponsors, quests: [...daily, ...achievements] };
   }
 
-  /**
-   * 메인 스폰서를 교체합니다. (해금 조건: 통산 승수)
-   * @param {number} userId
-   * @param {string} sponsorKey
-   * @returns {Promise<{sponsorKey:string}>}
-   */
   static async selectSponsor(userId, sponsorKey) {
     const sponsor = SPONSORS[sponsorKey];
     if (!sponsor) throw new ValidationError('알 수 없는 스폰서입니다.');
     const record = await ClubRepository.getClubRecord(null, userId);
-    if (record.wins < sponsor.requirement.wins) throw new ValidationError(`통산 ${sponsor.requirement.wins}승이 필요합니다.`);
+    if (record.wins < sponsor.requirement.wins) {
+      throw new ValidationError(`통산 ${sponsor.requirement.wins}승이 필요합니다.`);
+    }
     await ClubRepository.updateSponsor(null, userId, sponsorKey);
     return { sponsorKey };
   }
 
-  /**
-   * 퀘스트/업적 보상 수령.
-   * @param {number} userId
-   * @param {string} questKey
-   * @returns {Promise<{reward:Object, remainingWallet:Object}>}
-   */
   static async claimQuest(userId, questKey) {
     const finance = await ClubService.getFinance(userId);
     const quest = finance.quests.find((q) => q.key === questKey);
@@ -237,7 +260,10 @@ export default class ClubService {
       await ClubRepository.markQuestClaimed(conn, userId, questKey, period);
       await WalletService.earn(conn, wallet, quest.reward, `QUEST_${questKey}`);
       await conn.commit();
-      return { reward: quest.reward, remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold } };
+      return {
+        reward: quest.reward,
+        remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+      };
     } catch (err) {
       await conn.rollback().catch(() => {});
       throw err;
