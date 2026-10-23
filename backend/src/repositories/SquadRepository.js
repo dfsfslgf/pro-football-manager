@@ -6,7 +6,7 @@ import {
   SELECT_PLAYER_STAMINA_BY_IDS,
 } from '../queries/squadQueries.js';
 
-/** 선발 슬롯(0~10) 다음부터 벤치 슬롯이 시작됩니다. */
+/** 선발 슬롯(0~10) 다음부터 벤치 슬롯이 시작됩니다. (최대 11명 지원) */
 export const BENCH_SLOT_OFFSET = 11;
 
 /**
@@ -21,14 +21,16 @@ export default class SquadRepository {
    * @returns {Promise<number[]>}
    */
   static async findOwnedPlayerIdsForUpdate(conn, userId, playerIds) {
-    if (playerIds.length === 0) return [];
-    const [rows] = await conn.query(SELECT_OWNED_PLAYER_IDS_FOR_UPDATE, [userId, playerIds]);
+    if (!Array.isArray(playerIds) || playerIds.length === 0) return [];
+    const validIds = playerIds.filter((id) => Number.isInteger(Number(id)) && Number(id) > 0);
+    if (validIds.length === 0) return [];
+    const [rows] = await conn.query(SELECT_OWNED_PLAYER_IDS_FOR_UPDATE, [userId, validIds]);
     return rows.map((row) => Number(row.id));
   }
 
   /**
-   * 선발/벤치 슬롯을 일괄 저장합니다: 전원 초기화 -> 선발(슬롯 0~10) -> 벤치(슬롯 11~).
-   * 반드시 호출자가 연 트랜잭션 안에서 실행해야 합니다.
+   * 선발/벤치 슬롯을 일괄 저장합니다: 전원 초기화 -> 선발(슬롯 0~10) -> 벤치(슬롯 11~21).
+   * 최대 11명의 후보 선수가 누락되지 않도록 안전하게 바인딩합니다.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @param {number[]} starterIds
@@ -36,12 +38,26 @@ export default class SquadRepository {
    * @returns {Promise<void>}
    */
   static async saveSlots(conn, userId, starterIds, benchIds) {
+    // 1. 기존 유저의 모든 선발/벤치 슬롯 상태를 초기화
     await conn.query(RESET_LINEUP_SLOTS, [userId]);
-    for (let i = 0; i < starterIds.length; i++) {
-      await conn.query(UPDATE_LINEUP_SLOT, [true, i, starterIds[i], userId]);
+
+    // 2. 선발 11명(is_starter = true, slot 0~10) 일괄 업데이트
+    const safeStarters = Array.isArray(starterIds) ? starterIds.slice(0, 11) : [];
+    for (let i = 0; i < safeStarters.length; i++) {
+      const pid = Number(safeStarters[i]);
+      if (pid > 0) {
+        await conn.query(UPDATE_LINEUP_SLOT, [true, i, pid, userId]);
+      }
     }
-    for (let i = 0; i < benchIds.length; i++) {
-      await conn.query(UPDATE_LINEUP_SLOT, [false, BENCH_SLOT_OFFSET + i, benchIds[i], userId]);
+
+    // 3. 벤치 후보 최대 11명(is_starter = false, slot 11~21) 일괄 업데이트 (누락 방지)
+    const safeBench = Array.isArray(benchIds) ? benchIds.slice(0, 11) : [];
+    for (let i = 0; i < safeBench.length; i++) {
+      const pid = Number(safeBench[i]);
+      if (pid > 0) {
+        const slotIdx = BENCH_SLOT_OFFSET + i; // 11부터 최대 21까지 할당
+        await conn.query(UPDATE_LINEUP_SLOT, [false, slotIdx, pid, userId]);
+      }
     }
   }
 
@@ -54,8 +70,9 @@ export default class SquadRepository {
    */
   static async getPlayerStamina(conn, userId, playerIds) {
     const executor = conn || pool;
-    if (playerIds.length === 0) return new Map();
+    if (!Array.isArray(playerIds) || playerIds.length === 0) return new Map();
     const [rows] = await executor.query(SELECT_PLAYER_STAMINA_BY_IDS, [userId, playerIds]);
     return new Map(rows.map((row) => [Number(row.id), Number(row.stamina)]));
   }
 }
+

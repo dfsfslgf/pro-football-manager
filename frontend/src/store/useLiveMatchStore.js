@@ -1034,10 +1034,18 @@ export const useLiveMatchStore = create((set, get) => ({
     if (state.lockerTalk) return { success: false, message: '라커룸 토크는 하프타임에 한 번만 할 수 있습니다.' };
     if (!LOCKER_TALKS[type]) return { success: false, message: '알 수 없는 라커룸 토크입니다.' };
     const team = cloneTeam(state.homeTeam);
-    const isLosing = team.score < state.awayTeam.score;
-    team.talkEffect = getTalkEffect(type, isLosing);
-    team.teamMorale = Math.min(100, (team.teamMorale || 75) + 12);
-    const note = type === 'STERN' && !isLosing ? ' (앞서거나 비기고 있어 효과가 반감됩니다)' : '';
+    const away = state.awayTeam;
+    const scoreDiff = team.score - away.score;
+    const poorPerformance = (team.stats?.shots || 0) <= (away.stats?.shots || 0) || scoreDiff <= 1;
+
+    // [요구사항 12번 해결] 지고 있을 때뿐만 아니라 비기거나 경기력(슈팅 수)이 부진할 때, 혹은 1점 차 불안한 리드일 때도 질책(STERN) 효과 100% 발동!
+    const sternEffective = scoreDiff <= 0 || poorPerformance;
+    team.talkEffect = getTalkEffect(type, sternEffective);
+    team.teamMorale = Math.min(100, (team.teamMorale || 75) + (sternEffective ? 14 : 8));
+    const note =
+      type === 'STERN' && sternEffective
+        ? ' (선수들의 정신력이 바짝 무장되어 후반전 공수 집중력이 상승합니다!)'
+        : '';
     const description = `[라커룸 토크] 🗣️ ${LOCKER_TALKS[type].label}: ${LOCKER_TALKS[type].desc}${note}`;
     set({
       homeTeam: team,

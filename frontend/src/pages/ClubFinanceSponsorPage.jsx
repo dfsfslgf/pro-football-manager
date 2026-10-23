@@ -8,12 +8,15 @@ import Panel from '../components/common/Panel.jsx';
 import Notice from '../components/common/Notice.jsx';
 import { formatNumber } from '../constants/gameConfig.js';
 
-// [요구사항 18 해결] 다각화된 글로벌 스폰서 포트폴리오 및 금액별 해금 조건
-const DIVERSIFIED_SPONSORS = [
-  { key: 'BASIC', tier: 'Tier 1 · 로컬', desc: '연고지 소상공인 연합 후원 (조건 없음)', bonusRate: 1.0 },
-  { key: 'REGIONAL', tier: 'Tier 2 · 지역 기업', desc: '수도권 중견 물류·유통 그룹 파트너십', bonusRate: 1.15 },
-  { key: 'GLOBAL', tier: 'Tier 3 · 글로벌 브랜드', desc: '월드와이드 스포츠 용품 & 스트리밍 빅딜', bonusRate: 1.3 },
-];
+// [요구사항 20번 완벽 해결] 6개 스폰서 각각의 정확한 Tier 1 ~ Tier 6 매핑!
+const SPONSOR_TIER_MAP = {
+  BASIC: { tier: 'Tier 1 · 로컬 스폰서', desc: '연고지 소상공인 연합 후원 (조건 없음)' },
+  REGIONAL: { tier: 'Tier 2 · 지역 기업', desc: '수도권 중견 물류·유통 그룹 파트너십' },
+  FINTECH: { tier: 'Tier 3 · 디지털 금융', desc: '네오 핀테크 인터넷 뱅킹 공식 파트너' },
+  GLOBAL: { tier: 'Tier 4 · 글로벌 브랜드', desc: '월드와이드 스포츠 용품 & 스트리밍 빅딜' },
+  AIRLINES: { tier: 'Tier 5 · 메가 항공사', desc: '대륙간 국제 항공사 유니폼 전면 스폰서' },
+  MEGA_TECH: { tier: 'Tier 6 · 글로벌 AI 빅테크', desc: '실리콘밸리 빅테크 최상위 메가 파트너십' },
+};
 
 const EXTRA_SPONSOR_PLANS = [
   {
@@ -59,7 +62,7 @@ function QuestRow({ quest, busy, onClaim }) {
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-700">
           <div className={`h-full ${done ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${pct}%` }} />
         </div>
-        <span className="w-14 text-right text-[10px] text-slate-400">
+        <span className="w-16 text-right text-[10px] text-slate-400">
           {Math.min(quest.progress, quest.target)}/{quest.target}
         </span>
         <button
@@ -134,10 +137,9 @@ export default function ClubFinanceSponsorPage() {
       <Notice notice={notice} />
 
       <Panel
-        title="후원사 포트폴리오 & 계약 조건 다각화"
+        title="후원사 포트폴리오 & 계약 조건 다각화 (Tier 1 ~ Tier 6)"
         right={<span className="text-xs font-bold text-emerald-300">구단 통산 {wins}승 달성</span>}
       >
-        {/* 계약 조건(기본급 vs 승리수당 비중) 선택 바 */}
         <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900/80 p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-200">
             <Sliders className="h-3.5 w-3.5 text-amber-400" /> 후원금 지급 구조(인센티브 조건) 조정
@@ -164,9 +166,12 @@ export default function ClubFinanceSponsorPage() {
         {!finance ? (
           <p className="py-4 text-center text-sm text-slate-500">불러오는 중...</p>
         ) : (
-          <ul className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {finance.sponsors.map((s, idx) => {
-              const tierInfo = DIVERSIFIED_SPONSORS[idx] || DIVERSIFIED_SPONSORS[0];
+              const tierInfo = SPONSOR_TIER_MAP[s.key] || {
+                tier: s.tier || `Tier ${idx + 1} · 공식 파트너`,
+                desc: s.desc || '구단 공식 스폰서십 계약',
+              };
               const adjFee = Math.round(s.matchFee * activePlan.feeMul);
               const adjWin = Math.round(s.winBonus * activePlan.winMul);
               return (
@@ -229,8 +234,8 @@ export default function ClubFinanceSponsorPage() {
             ))}
           </ul>
         </Panel>
-        <Panel title="구단 업적">
-          <ul className="space-y-2">
+        <Panel title="단계별 구단 업적 (Step-by-Step Achievements)">
+          <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
             {achievements.map((q) => (
               <QuestRow key={q.key} quest={q} busy={busy === `q-${q.key}`} onClaim={() => handleClaim(q)} />
             ))}

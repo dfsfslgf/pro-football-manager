@@ -70,8 +70,11 @@ export default function PreMatchLobbyPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!pending) go('modes');
-    else if (!useSquadStore.getState().dirty) useSquadStore.getState().loadSquad();
+    if (!pending) {
+      go('modes');
+    } else if (!useSquadStore.getState().loaded) {
+      useSquadStore.getState().loadSquad(false);
+    }
   }, [pending, go]);
 
   if (!pending) return null;

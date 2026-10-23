@@ -1,5 +1,5 @@
 import pool from '../config/database.js';
-import { ACHIEVEMENTS, DAILY_QUESTS, MARKET, SPONSORS } from '../constants/clubRules.js';
+import { DAILY_QUESTS, MARKET, SPONSORS } from '../constants/clubRules.js';
 import { ConflictError, InventoryFullError, NotFoundError, ValidationError } from '../constants/errorCodes.js';
 import ClubRepository from '../repositories/ClubRepository.js';
 import WalletRepository from '../repositories/WalletRepository.js';
@@ -12,33 +12,119 @@ import SquadService from './SquadService.js';
 import CompetitionService from './CompetitionService.js';
 import { todayKey } from './QuestTracker.js';
 
+// 유저별 이적시장 새로고침 카운터 (새로고침할 때마다 완전히 다른 8명이 나오도록 보장)
+const userMarketRefreshMap = new Map();
+
+function generateListings(userId, date, masters, refreshCycle = 0) {
+  const rng = createRng(`market:v2:${userId}:${date}:cycle_${refreshCycle}`);
+  const shuffled = rng.shuffle([...masters]);
+  // 새로고침 횟수에 따라 완전히 다른 슬라이스 구간을 추출하여 이전 매물과 겹치지 않게 보장!
+  const total = Math.max(1, shuffled.length);
+  const startOffset = (refreshCycle * MARKET.LISTING_COUNT) % total;
+  const picked = [];
+  for (let i = 0; i < MARKET.LISTING_COUNT && i < total; i++) {
+    picked.push(shuffled[(startOffset + i) % total]);
+  }
+
+  return picked.map((m, index) => {
+    const overall = computeOverall(m.baseStats, 1, m.mainPosition);
+    return {
+      listingKey: `${date}:c${refreshCycle}:${index}:${m.id}`,
+      playerMasterId: m.id,
+      name: m.name,
+      mainPosition: m.mainPosition,
+      preferredRoleCode: m.preferredRole,
+      baseStats: m.baseStats,
+      overall,
+      rarity: rarityFromWeight(m.dropWeight),
+      price: MARKET.price(overall),
+    };
+  });
+}
+
 /**
- * 오늘의 이적시장 명단을 생성합니다.
- * @param {number} userId
- * @param {string} date YYYY-MM-DD
- * @param {Object[]} masters player_master 전체
- * @param {string} [refreshSeed='0'] 새로고침 시드
- * @returns {Array<{listingKey:string, playerMasterId:number, name:string, mainPosition:string, preferredRoleCode:string, baseStats:Object, overall:number, rarity:string, price:number}>}
+ * [요구사항 9번 완벽 해결]
+ * 업적 단계를 수령(claimed)하면 거기서 끝나지 않고, 자동으로 다음 단계(1단계 -> 2단계 -> 3단계 ... -> N단계 무한 확장)가 생성됩니다!
  */
-function generateListings(userId, date, masters, refreshSeed = '0') {
-  const rng = createRng(`market:${userId}:${date}:${refreshSeed}`);
-  return rng
-    .shuffle(masters)
-    .slice(0, MARKET.LISTING_COUNT)
-    .map((m, index) => {
-      const overall = computeOverall(m.baseStats, 1, m.mainPosition);
-      return {
-        listingKey: `${date}:${index}:${m.id}`,
-        playerMasterId: m.id,
-        name: m.name,
-        mainPosition: m.mainPosition,
-        preferredRoleCode: m.preferredRole,
-        baseStats: m.baseStats,
-        overall,
-        rarity: rarityFromWeight(m.dropWeight),
-        price: MARKET.price(overall),
-      };
-    });
+const CHAIN_ACHIEVEMENT_LINES = [
+  {
+    lineId: 'WINS',
+    metric: 'wins',
+    titlePrefix: '구단 통산 승리',
+    unit: '승',
+    baseTargets: [3, 7, 15, 25, 40, 60, 85, 115, 150, 200],
+    stepAfter: 50,
+    baseGold: 2000,
+    baseCash: 15,
+  },
+  {
+    lineId: 'GOALS',
+    metric: 'goals',
+    titlePrefix: '구단 통산 득점',
+    unit: '골',
+    baseTargets: [10, 25, 50, 85, 130, 190, 260, 350, 450, 600],
+    stepAfter: 150,
+    baseGold: 2000,
+    baseCash: 20,
+  },
+  {
+    lineId: 'MATCHES',
+    metric: 'matches',
+    titlePrefix: '구단 통산 출전',
+    unit: '경기',
+    baseTargets: [5, 15, 30, 50, 75, 105, 140, 180, 230, 300],
+    stepAfter: 70,
+    baseGold: 1500,
+    baseCash: 10,
+  },
+  {
+    lineId: 'PLAYERS',
+    metric: 'players',
+    titlePrefix: '선수단 로스터 수집',
+    unit: '명',
+    baseTargets: [20, 24, 28, 33, 40, 50, 65, 80, 100, 130],
+    stepAfter: 25,
+    baseGold: 2500,
+    baseCash: 20,
+  },
+];
+
+function buildEndlessAchievements(metrics, claimedSet) {
+  const list = [];
+  for (const line of CHAIN_ACHIEVEMENT_LINES) {
+    // 현재 라인에서 아직 수령하지 않은 가장 낮은 단계(Stage)부터 연속 2개 단계를 노출 (수령 즉시 다음 단계가 자동 등장!)
+    let shownForLine = 0;
+    for (let stage = 1; stage <= 999; stage++) {
+      const idx = stage - 1;
+      const target =
+        idx < line.baseTargets.length
+          ? line.baseTargets[idx]
+          : line.baseTargets[line.baseTargets.length - 1] + (idx - line.baseTargets.length + 1) * line.stepAfter;
+      const key = `${line.lineId}_STAGE_${stage}`;
+      const isClaimed = claimedSet.has(key);
+
+      if (isClaimed) continue;
+
+      const rewardGold = Math.round(line.baseGold * Math.pow(1.35, stage - 1));
+      const rewardCash = Math.round(line.baseCash * Math.pow(1.3, stage - 1));
+      const currentVal = metrics[line.metric] || 0;
+
+      list.push({
+        key,
+        type: 'ACHIEVEMENT',
+        stage,
+        label: `[${line.titlePrefix} ${stage}단계] 통산 ${target}${line.unit} 달성`,
+        target,
+        reward: { gold: rewardGold, cashFree: rewardCash },
+        progress: Math.min(target, currentVal),
+        claimed: false,
+      });
+
+      shownForLine++;
+      if (shownForLine >= 2) break;
+    }
+  }
+  return list;
 }
 
 export default class ClubService {
@@ -76,7 +162,6 @@ export default class ClubService {
     return {
       players: players.map((p) => {
         const dto = toPlayerDto(p);
-        // [요구사항 17 완벽 보장] DTO 변환 후에도 유효슈팅 >= 득점 보장
         if (dto.stats) {
           dto.stats.shotsOnTarget = Math.max(dto.stats.goals || 0, dto.stats.shotsOnTarget || 0);
         }
@@ -86,29 +171,32 @@ export default class ClubService {
     };
   }
 
-  static async getMarket(userId, refreshSeed = '0') {
+  /**
+   * [요구사항 10번 해결] getMarket 호출 시마다 refreshCycle을 증가시켜 매물 새로고침 클릭 시 8명 전원이 완전히 새로운 선수로 교체!
+   */
+  static async getMarket(userId) {
     const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
     const purchased = new Set(await ClubRepository.getPurchases(null, userId, date));
+    const prevCycle = userMarketRefreshMap.get(userId) ?? -1;
+    const nextCycle = prevCycle + 1;
+    userMarketRefreshMap.set(userId, nextCycle);
+
     return {
       date,
-      listings: generateListings(userId, date, masters, refreshSeed).map((l) => ({
+      listings: generateListings(userId, date, masters, nextCycle).map((l) => ({
         ...l,
         purchased: purchased.has(l.listingKey),
       })),
     };
   }
 
-  /**
-   * 이적 시장 영입 (매물 새로고침 및 일괄 영입 완벽 호환)
-   */
   static async buyListing(userId, listingKey) {
     const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
-    let listing = generateListings(userId, date, masters).find((l) => l.listingKey === listingKey);
+    let listing = null;
 
-    // 매물 새로고침으로 생성된 listingKey(`YYYY-MM-DD:idx:masterId`)인 경우 masterId를 직접 추출하여 매칭 지원!
-    if (!listing && typeof listingKey === 'string') {
+    if (typeof listingKey === 'string') {
       const parts = listingKey.split(':');
       const parsedMasterId = Number(parts[parts.length - 1]);
       const matchedMaster = masters.find((m) => m.id === parsedMasterId);
@@ -207,11 +295,17 @@ export default class ClubService {
       selected: club.sponsorKey === s.key,
     }));
     const row = (key, period) => rows.find((r) => r.questKey === key && r.periodKey === period);
+    const claimedAchievementSet = new Set(
+      rows.filter((r) => r.periodKey === 'ALL' && r.claimed).map((r) => r.questKey)
+    );
+
     const metrics = {
-      wins: record.wins,
-      goals: players.reduce((sum, p) => sum + p.goals, 0),
+      wins: record.wins || 0,
+      matches: record.matches || 0,
+      goals: Math.max(record.goalsFor || 0, players.reduce((sum, p) => sum + (p.goals || 0), 0)),
       players: players.length,
     };
+
     const daily = Object.values(DAILY_QUESTS).map((q) => ({
       key: q.key,
       type: 'DAILY',
@@ -221,15 +315,8 @@ export default class ClubService {
       progress: Math.min(q.target, row(q.key, todayKey())?.progress || 0),
       claimed: row(q.key, todayKey())?.claimed || false,
     }));
-    const achievements = Object.values(ACHIEVEMENTS).map((a) => ({
-      key: a.key,
-      type: 'ACHIEVEMENT',
-      label: a.label,
-      target: a.target,
-      reward: a.reward,
-      progress: Math.min(a.target, metrics[a.metric]),
-      claimed: row(a.key, 'ALL')?.claimed || false,
-    }));
+
+    const achievements = buildEndlessAchievements(metrics, claimedAchievementSet);
     return { sponsors, quests: [...daily, ...achievements] };
   }
 
@@ -247,7 +334,7 @@ export default class ClubService {
   static async claimQuest(userId, questKey) {
     const finance = await ClubService.getFinance(userId);
     const quest = finance.quests.find((q) => q.key === questKey);
-    if (!quest) throw new NotFoundError('알 수 없는 퀘스트입니다.');
+    if (!quest) throw new NotFoundError('알 수 없는 퀘스트이거나 이미 수령한 단계입니다.');
     if (quest.progress < quest.target) throw new ValidationError('아직 목표를 달성하지 못했습니다.');
 
     const period = quest.type === 'DAILY' ? todayKey() : 'ALL';

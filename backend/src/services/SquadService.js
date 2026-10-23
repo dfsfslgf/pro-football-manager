@@ -7,34 +7,34 @@ import SquadRepository from '../repositories/SquadRepository.js';
 import { toPlayerDto } from '../utils/playerDto.js';
 
 const STARTER_COUNT = 11;
-const DEFAULT_TEAM_TACTICS = { mentality: 'BALANCED', passingStyle: 'MIXED', tempo: 'NORMAL', defensiveLine: 'NORMAL', pressing: 'MEDIUM' };
+const MAX_BENCH_COUNT = 11;
+const DEFAULT_TEAM_TACTICS = {
+  mentality: 'BALANCED',
+  passingStyle: 'MIXED',
+  tempo: 'NORMAL',
+  defensiveLine: 'NORMAL',
+  pressing: 'MEDIUM',
+};
 
-/**
- * @param {unknown} v
- * @returns {boolean}
- */
+const POS_ORDER = { FW: 1, MF: 2, DF: 3, GK: 4 };
+
 function isPositiveInt(v) {
   return Number.isSafeInteger(v) && v > 0;
 }
 
-/**
- * lineupSlot 오름차순(null 은 뒤로), 동률이면 레벨 내림차순 비교 함수.
- * @param {{lineupSlot:number|null, level:number}} a
- * @param {{lineupSlot:number|null, level:number}} b
- * @returns {number}
- */
 function bySlotThenLevel(a, b) {
-  const sa = a.lineupSlot === null ? Number.MAX_SAFE_INTEGER : a.lineupSlot;
-  const sb = b.lineupSlot === null ? Number.MAX_SAFE_INTEGER : b.lineupSlot;
+  const sa = a.lineupSlot === null ? Number.MAX_SAFE_INTEGER : Number(a.lineupSlot);
+  const sb = b.lineupSlot === null ? Number.MAX_SAFE_INTEGER : Number(b.lineupSlot);
   return sa - sb || b.level - a.level;
 }
 
-/**
- * 라인업이 저장되지 않은 유저를 위해 슬롯 포지션에 맞는 고레벨 선수를 자동 배치합니다.
- * @param {Object[]} players
- * @param {string} formation
- * @returns {Object[]} 길이 11, index = slotIndex
- */
+function byPositionThenLevel(a, b) {
+  const pa = POS_ORDER[a.mainPosition] || 99;
+  const pb = POS_ORDER[b.mainPosition] || 99;
+  if (pa !== pb) return pa - pb;
+  return b.level - a.level || a.userPlayerId - b.userPlayerId;
+}
+
 function autoPickStarters(players, formation) {
   const slots = getFormationSlots(formation);
   const remaining = [...players].sort((a, b) => b.level - a.level);
@@ -46,12 +46,6 @@ function autoPickStarters(players, formation) {
   return picked.map((p) => p || remaining.shift());
 }
 
-/**
- * 팀 세부 전술 값을 검증/정규화합니다. 없으면 기본값을 반환합니다.
- * @param {Object|undefined|null} tactics
- * @returns {Object}
- * @throws {ValidationError}
- */
 export function normalizeTeamTactics(tactics) {
   if (tactics === undefined || tactics === null) return { ...DEFAULT_TEAM_TACTICS };
   const result = {};
@@ -63,51 +57,55 @@ export function normalizeTeamTactics(tactics) {
   return result;
 }
 
-/**
- * 포메이션 검증, 선발 11명 + 벤치 7명 + 후보 배치, 팀 전술/개인 지침 영구 저장 비즈니스 로직.
- */
 export default class SquadService {
-  /**
-   * 유저의 포메이션/팀 전술/선발/벤치/후보 전체를 조회합니다.
-   * @param {number} userId
-   * @returns {Promise<{formation:string, teamTactics:Object, starters:Object[], bench:Object[], reserve:Object[]}>}
-   */
   static async getSquad(userId) {
     const players = await ClubRepository.getFullPlayers(null, userId);
     const settings = await ClubRepository.getSquadSettings(null, userId);
     const formation = isValidFormation(settings?.formation) ? settings.formation : DEFAULT_FORMATION;
 
     const savedStarters = players.filter((p) => p.isStarter).sort(bySlotThenLevel);
-    const starters = savedStarters.length >= STARTER_COUNT ? savedStarters.slice(0, STARTER_COUNT) : autoPickStarters(players, formation);
+    const starters =
+      savedStarters.length >= STARTER_COUNT ? savedStarters.slice(0, STARTER_COUNT) : autoPickStarters(players, formation);
     const usedIds = new Set(starters.map((p) => p.userPlayerId));
-    const rest = players.filter((p) => !usedIds.has(p.userPlayerId)).sort(bySlotThenLevel);
-    const bench = rest.slice(0, GAME_RULES.BENCH_SIZE);
-    const reserve = rest.slice(GAME_RULES.BENCH_SIZE);
+    const rest = players.filter((p) => !usedIds.has(p.userPlayerId));
+
+    // [요구사항 2번 핵심 해결]
+    // DB에 저장된 벤치 후보(lineupSlot !== null)가 있으면, 절대 임의로 섞거나 예비 선수와 합치지 않고 저장된 슬롯 순서 그대로 반환!
+    const savedBench = rest
+      .filter((p) => p.lineupSlot !== null && Number(p.lineupSlot) >= 11)
+      .sort(bySlotThenLevel);
+
+    let benchRaw;
+    if (savedBench.length > 0) {
+      benchRaw = savedBench.slice(0, MAX_BENCH_COUNT);
+    } else {
+      // 최초 생성 시에만 기본 후보 자동 배정
+      benchRaw = [...rest].sort(byPositionThenLevel).slice(0, MAX_BENCH_COUNT);
+    }
+
+    const benchIdsSet = new Set(benchRaw.map((p) => p.userPlayerId));
+    const reserveRaw = rest.filter((p) => !benchIdsSet.has(p.userPlayerId)).sort(byPositionThenLevel);
 
     return {
       formation,
       teamTactics: normalizeTeamTactics(settings?.teamTactics),
       starters: starters.map(toPlayerDto),
-      bench: bench.map(toPlayerDto),
-      reserve: reserve.map(toPlayerDto),
+      bench: benchRaw.map(toPlayerDto),
+      reserve: reserveRaw.map(toPlayerDto),
     };
   }
 
-  /**
-   * 라인업(포메이션/전술/선발/벤치/개인 지침)을 검증하고 트랜잭션으로 저장합니다.
-   * @param {number} userId
-   * @param {{formation:string, teamTactics?:Object, starterIds:number[], benchIds:number[], instructions?:Object<string,string>}} lineup
-   * @returns {Promise<{formation:string}>}
-   * @throws {ValidationError|NotFoundError}
-   */
   static async saveSquad(userId, lineup) {
     const { formation, starterIds, benchIds = [], instructions = {} } = lineup || {};
     if (!isValidFormation(formation)) {
       throw new ValidationError(`formation 은 ${FORMATION_CODES.join(', ')} 중 하나여야 합니다.`);
     }
-    if (!Array.isArray(starterIds) || starterIds.length !== STARTER_COUNT) throw new ValidationError('선발 선수는 정확히 11명이어야 합니다.');
-    if (!Array.isArray(benchIds) || benchIds.length > GAME_RULES.BENCH_SIZE) throw new ValidationError(`벤치 선수는 최대 ${GAME_RULES.BENCH_SIZE}명입니다.`);
-    const allIds = [...starterIds, ...benchIds];
+    if (!Array.isArray(starterIds) || starterIds.length !== STARTER_COUNT) {
+      throw new ValidationError('선발 선수는 정확히 11명이어야 합니다.');
+    }
+    const normalizedBenchIds = Array.isArray(benchIds) ? benchIds.map(Number).filter(isPositiveInt).slice(0, MAX_BENCH_COUNT) : [];
+    const normalizedStarterIds = starterIds.map(Number);
+    const allIds = [...normalizedStarterIds, ...normalizedBenchIds];
     if (!allIds.every(isPositiveInt)) throw new ValidationError('선수 ID 는 1 이상의 정수여야 합니다.');
     if (new Set(allIds).size !== allIds.length) throw new ValidationError('선발/벤치에 중복된 선수가 있습니다.');
     const teamTactics = normalizeTeamTactics(lineup.teamTactics);
@@ -115,10 +113,13 @@ export default class SquadService {
     const instructionEntries = [];
     if (instructions && typeof instructions === 'object') {
       for (const [id, instruction] of Object.entries(instructions)) {
-        if (!isPositiveInt(Number(id)) || !Object.prototype.hasOwnProperty.call(GAME_RULES.INSTRUCTION_STAMINA_MULTIPLIER, instruction)) {
-          throw new ValidationError('개인 지침 값이 올바르지 않습니다.');
+        if (
+          !isPositiveInt(Number(id)) ||
+          !Object.prototype.hasOwnProperty.call(GAME_RULES.INSTRUCTION_STAMINA_MULTIPLIER, instruction)
+        ) {
+          continue;
         }
-        if (!starterIds.includes(Number(id))) continue;
+        if (!normalizedStarterIds.includes(Number(id))) continue;
         instructionEntries.push([Number(id), instruction]);
       }
     }
@@ -129,7 +130,7 @@ export default class SquadService {
       const owned = await SquadRepository.findOwnedPlayerIdsForUpdate(conn, userId, allIds);
       if (owned.length !== allIds.length) throw new NotFoundError('보유하지 않은 선수가 라인업에 포함되어 있습니다.');
 
-      await SquadRepository.saveSlots(conn, userId, starterIds, benchIds);
+      await SquadRepository.saveSlots(conn, userId, normalizedStarterIds, normalizedBenchIds);
       await ClubRepository.saveInstructions(conn, userId, instructionEntries);
       await ClubRepository.saveSquadSettings(conn, userId, formation, teamTactics);
       await conn.commit();

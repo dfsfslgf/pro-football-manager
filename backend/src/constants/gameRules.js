@@ -1,11 +1,11 @@
 /**
- * 게임 밸런스 상수 모음. 시뮬레이션/가챠 로직의 매직 넘버를 한곳에서 튜닝할 수 있도록 분리합니다.
+ * 게임 밸런스 상수 모음 (교체 최대 5명, 벤치 후보 최대 11명 반영)
  */
 export const GAME_RULES = Object.freeze({
   GACHA_DEFAULT_COST: 100,
   MAX_PLAYER_INVENTORY: 200,
   STAMINA_DEBUFF_THRESHOLD: 30,
-  PLAN_B_ROTATION_STAMINA: 25,
+  PLAN_B_ROTATION_STAMINA: 30,
   TACTIC_MODIFIERS: Object.freeze({
     ATTACK: Object.freeze({ atk: 1.4, def: 0.6, staminaDrain: 1.2 }),
     BALANCE: Object.freeze({ atk: 1.0, def: 1.0, staminaDrain: 1.0 }),
@@ -13,21 +13,21 @@ export const GAME_RULES = Object.freeze({
   }),
 
   MATCH_MINUTES: 90,
-  SQUAD_SIZE: 18,
+  SQUAD_SIZE: 22,
   MIN_SQUAD_SIZE: 11,
-  BENCH_SIZE: 7,
+  BENCH_SIZE: 11,
   FORMATION: Object.freeze({ GK: 1, DF: 4, MF: 3, FW: 3 }),
-  MAX_SUBSTITUTIONS: 3,
+  MAX_SUBSTITUTIONS: 5,
   MIN_STAMINA: 5,
-  PLAN_B_ROTATION_MINUTE: 65,
+  PLAN_B_ROTATION_MINUTE: 60,
   ALL_IN_MINUTE: 80,
   HOME_ADVANTAGE: 1.05,
   SCENE_CHANCE: 0.26,
-  FOUL_SCENE_CHANCE: 0.06,
-  CARD_CHANCE: 0.45,
+  FOUL_SCENE_CHANCE: 0.04,
+  CARD_CHANCE: 0.28,
   GOAL_THRESHOLD: 1.08,
 
-  LIVE_MATCH_MIN_DURATION_MS: 10000,
+  LIVE_MATCH_MIN_DURATION_MS: 3000,
   LIVE_SESSION_TTL_MS: 3 * 60 * 60 * 1000,
 
   HALF_TIME_MINUTE: 45,
@@ -35,7 +35,6 @@ export const GAME_RULES = Object.freeze({
   BASE_TICK_DRAIN_RANGE: 0.16,
   HALF_TIME_RECOVERY: Object.freeze({ RATIO: 0.25, MIN: 5, MAX: 12 }),
 
-  /** 슬롯 세부 포지션별 분당 체력 소모 계수 (클라이언트 tacticsConfig.js 와 동일) */
   DEFAULT_POSITION_DRAIN: 0.75,
   POSITION_STAMINA_DRAIN_MULTIPLIER: Object.freeze({
     GK: 0.06,
@@ -64,10 +63,8 @@ export const GAME_RULES = Object.freeze({
     RM: 1.18,
   }),
 
-  /** 포지션 적합도 능력치 배율 */
   POSITION_FAMILIARITY_MULTIPLIER: Object.freeze({ NATURAL: 1.0, ADEQUATE: 0.9, UNFAMILIAR: 0.75, SEVERE: 0.4 }),
 
-  /** 팀 세부 전술 허용 값 및 체력 소모 배율 (템포 x 압박) */
   TEAM_TACTIC_OPTIONS: Object.freeze({
     mentality: Object.freeze(['PARK_THE_BUS', 'DEFENSIVE', 'BALANCED', 'ATTACKING', 'ALL_OUT_ATTACK']),
     passingStyle: Object.freeze(['SHORT', 'MIXED', 'DIRECT_LONG']),
@@ -80,7 +77,6 @@ export const GAME_RULES = Object.freeze({
     pressing: Object.freeze({ LOW: 0.8, MEDIUM: 1.0, HIGH: 1.2 }),
   }),
 
-  /** 선수 개인 지침별 체력 소모 배율 */
   INSTRUCTION_STAMINA_MULTIPLIER: Object.freeze({
     BALANCED: 1.0,
     STAY_BACK: 0.75,

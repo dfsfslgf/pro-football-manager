@@ -229,37 +229,23 @@ export function generatePlayerMasterRows() {
  * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor
  * @returns {Promise<number>} 삽입/갱신한 행 수
  */
-export async function ensurePlayerMasterSeed(executor) {
-  const rows = generatePlayerMasterRows();
-  const [existingRows] = await executor.query('SELECT id, name FROM player_master ORDER BY id ASC');
+export async function ensurePlayerMasterSeed(conn) {
+  const [rows] = await conn.query('SELECT COUNT(*) AS cnt FROM player_master');
+  const existingCount = Number(rows?.[0]?.cnt || 0);
 
-  if (existingRows.length === 0) {
-    for (const row of rows) {
-      await executor.query(
-        'INSERT INTO player_master (name, main_position, preferred_role, drop_weight, base_stats, tags) VALUES (?, ?, ?, ?, ?, ?)',
-        [row.name, row.main_position, row.preferred_role, row.drop_weight, JSON.stringify(row.base_stats), JSON.stringify(row.tags)]
-      );
-    }
-    return rows.length;
+  if (existingCount > 0) {
+    console.log(`[Seed] player_master 테이블에 이미 ${existingCount}명의 선수 데이터가 존재하므로 시드 덮어쓰기를 건너뜁니다.`);
+    return 0;
   }
 
-  // 기존 DB에 예전 가짜 이름(예: 김태현 등)이 남아있는 경우 외래키(id)를 보존하며 실제 선수로 업데이트 및 부족분 추가 삽입
-  let updatedCount = 0;
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (i < existingRows.length) {
-      const targetId = existingRows[i].id;
-      await executor.query(
-        'UPDATE player_master SET name = ?, main_position = ?, preferred_role = ?, drop_weight = ?, base_stats = ?, tags = ? WHERE id = ?',
-        [row.name, row.main_position, row.preferred_role, row.drop_weight, JSON.stringify(row.base_stats), JSON.stringify(row.tags), targetId]
-      );
-    } else {
-      await executor.query(
-        'INSERT INTO player_master (name, main_position, preferred_role, drop_weight, base_stats, tags) VALUES (?, ?, ?, ?, ?, ?)',
-        [row.name, row.main_position, row.preferred_role, row.drop_weight, JSON.stringify(row.base_stats), JSON.stringify(row.tags)]
-      );
-    }
-    updatedCount++;
+  const catalog = buildMasterCatalog();
+  let inserted = 0;
+  for (const p of catalog) {
+    await conn.query(
+      'INSERT INTO player_master (name, main_position, preferred_role, drop_weight, base_stats, tags) VALUES (?, ?, ?, ?, ?, ?)',
+      [p.name, p.mainPosition, p.preferredRole, p.dropWeight, JSON.stringify(p.baseStats), JSON.stringify(p.tags)]
+    );
+    inserted++;
   }
-  return updatedCount;
+  return inserted;
 }

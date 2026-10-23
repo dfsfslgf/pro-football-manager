@@ -8,9 +8,7 @@ import { computeOverall, rarityFromWeight } from '../utils/playerMath.js';
 import { trackDailyQuest } from './QuestTracker.js';
 
 /**
- * 가중치 기반 난수 추첨.
- * @param {Array<{dropWeight:number}>} candidates
- * @returns {Object}
+ * 일반 캐시 패키지용 가중치 기반 난수 추첨.
  */
 function pickWeighted(candidates) {
   const total = candidates.reduce((sum, c) => sum + c.dropWeight, 0);
@@ -23,33 +21,85 @@ function pickWeighted(candidates) {
 }
 
 /**
- * 스카우트(가챠) 비즈니스 로직. 단일 트랜잭션 안에서 재화 차감 + 추첨 + 지급을 원자적으로 처리합니다.
+ * [요구사항 1번 완벽 해결]
+ * 골드 기본 스카우트(GOLD_BASIC) 전용 추첨기:
+ * - LEGEND: 0% (절대 등장하지 않음)
+ * - EPIC: 정확히 0.4% (0.004)
+ * - RARE: 19.6% (0.196)
+ * - COMMON: 80.0% (0.800)
  */
+const GOLD_BASIC_FIXED_ODDS = [
+  { rarity: 'LEGEND', percent: 0 },
+  { rarity: 'EPIC', percent: 0.4 },
+  { rarity: 'RARE', percent: 19.6 },
+  { rarity: 'COMMON', percent: 80.0 },
+];
+
+function pickGoldBasicCandidate(candidates) {
+  // 등급별로 후보군 분리 (LEGEND는 완전 제외)
+  const buckets = {
+    EPIC: [],
+    RARE: [],
+    COMMON: [],
+  };
+  for (const c of candidates) {
+    const r = rarityFromWeight(c.dropWeight);
+    if (r === 'EPIC') buckets.EPIC.push(c);
+    else if (r === 'RARE') buckets.RARE.push(c);
+    else if (r === 'COMMON') buckets.COMMON.push(c);
+  }
+
+  const roll = Math.random() * 100; // 0.0 ~ 100.0
+  let targetRarity = 'COMMON';
+  if (roll < 0.4) {
+    targetRarity = 'EPIC'; // 0.4% 확률
+  } else if (roll < 20.0) {
+    targetRarity = 'RARE'; // 19.6% 확률
+  } else {
+    targetRarity = 'COMMON'; // 80.0% 확률
+  }
+
+  let poolForRarity = buckets[targetRarity];
+  if (!poolForRarity || poolForRarity.length === 0) {
+    poolForRarity = buckets.COMMON.length > 0 ? buckets.COMMON : buckets.RARE.length > 0 ? buckets.RARE : candidates;
+  }
+  return poolForRarity[Math.floor(Math.random() * poolForRarity.length)];
+}
+
 export default class GachaService {
   /**
    * 스카우트 패키지 목록과 등급별 확률표를 반환합니다.
-   * @returns {Promise<Array<{key:string, label:string, currency:string, costs:Object, positions:string[]|null, odds:Array<{rarity:string, percent:number}>}>>}
    */
   static async getPackages() {
     const masters = await ClubRepository.getAllMasters(null);
     return Object.values(SCOUT_PACKAGES).map((pkg) => {
+      // 골드 기본 스카우트는 고정 확률표(LEGEND 0%, EPIC 0.4%, RARE 19.6%, COMMON 80%) 반환
+      if (pkg.key === 'GOLD_BASIC' || pkg.currency === 'GOLD') {
+        return {
+          key: pkg.key,
+          label: pkg.label,
+          currency: pkg.currency,
+          costs: pkg.costs,
+          positions: pkg.positions,
+          odds: GOLD_BASIC_FIXED_ODDS,
+        };
+      }
+
       const pool_ = pkg.positions ? masters.filter((m) => pkg.positions.includes(m.mainPosition)) : masters;
       const total = pool_.reduce((sum, m) => sum + m.dropWeight, 0) || 1;
       const byRarity = {};
-      for (const m of pool_) byRarity[rarityFromWeight(m.dropWeight)] = (byRarity[rarityFromWeight(m.dropWeight)] || 0) + m.dropWeight;
-      const odds = ['LEGEND', 'EPIC', 'RARE', 'COMMON'].map((rarity) => ({ rarity, percent: Math.round(((byRarity[rarity] || 0) / total) * 1000) / 10 }));
+      for (const m of pool_) {
+        const r = rarityFromWeight(m.dropWeight);
+        byRarity[r] = (byRarity[r] || 0) + m.dropWeight;
+      }
+      const odds = ['LEGEND', 'EPIC', 'RARE', 'COMMON'].map((rarity) => ({
+        rarity,
+        percent: Math.round(((byRarity[rarity] || 0) / total) * 1000) / 10,
+      }));
       return { key: pkg.key, label: pkg.label, currency: pkg.currency, costs: pkg.costs, positions: pkg.positions, odds };
     });
   }
 
-  /**
-   * 스카우트 실행. 캐시 패키지는 무상 캐시를 먼저 차감하고 부족분만 유상 캐시에서 차감합니다.
-   * 지갑을 FOR UPDATE 로 잠근 뒤 인벤토리 한도를 검사하므로 동시 요청에서도 한도/잔액이 깨지지 않습니다.
-   * @param {number} userId
-   * @param {string} packageKey SCOUT_PACKAGES 키
-   * @param {number} count 뽑기 횟수 (패키지 costs 에 정의된 횟수만 허용)
-   * @returns {Promise<{results:Array<Object>, consumption:Object, remainingWallet:{cashPaid:number, cashFree:number, gold:number}}>}
-   */
   static async scout(userId, packageKey, count = 1) {
     const pkg = SCOUT_PACKAGES[packageKey];
     if (!pkg) throw new ValidationError('알 수 없는 스카우트 패키지입니다.');
@@ -63,7 +113,9 @@ export default class GachaService {
       if (!wallet) throw new NotFoundError('유저 지갑 정보를 찾을 수 없습니다.');
 
       const owned = await PlayerRepository.countUserPlayers(conn, userId);
-      if (owned + count > MARKET.MAX_ROSTER) throw new InventoryFullError(`선수 보유 한도(${MARKET.MAX_ROSTER}명)를 초과합니다.`);
+      if (owned + count > MARKET.MAX_ROSTER) {
+        throw new InventoryFullError(`선수 보유 한도(${MARKET.MAX_ROSTER}명)를 초과합니다.`);
+      }
 
       let deductedFree = 0;
       let deductedPaid = 0;
@@ -90,9 +142,11 @@ export default class GachaService {
       const candidates = await PlayerRepository.getGachaCandidatePool(conn, pkg.positions);
       if (candidates.length === 0) throw new NotFoundError('뽑을 수 있는 선수 후보군이 없습니다.');
 
+      const isGoldGacha = pkg.key === 'GOLD_BASIC' || pkg.currency === 'GOLD';
       const results = [];
+
       for (let i = 0; i < count; i++) {
-        const picked = pickWeighted(candidates);
+        const picked = isGoldGacha ? pickGoldBasicCandidate(candidates) : pickWeighted(candidates);
         const userPlayerId = await ClubRepository.insertPlainPlayer(conn, userId, picked.id);
         results.push({
           userPlayerId,
@@ -124,7 +178,15 @@ export default class GachaService {
 
       return {
         results,
-        consumption: { packageKey: pkg.key, count, totalCost: cost, currency: pkg.currency, deductedFree, deductedPaid, currencyType },
+        consumption: {
+          packageKey: pkg.key,
+          count,
+          totalCost: cost,
+          currency: pkg.currency,
+          deductedFree,
+          deductedPaid,
+          currencyType,
+        },
         remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
       };
     } catch (err) {

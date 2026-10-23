@@ -13,12 +13,17 @@ const ROLE_OPTIONS = {
   FW: ['LW', 'RW', 'ST'],
 };
 
-/**
- * 트랜잭션을 열고 콜백을 실행합니다. 실패 시 롤백합니다.
- * @template T
- * @param {(conn: import('mysql2/promise').PoolConnection) => Promise<T>} fn
- * @returns {Promise<T>}
- */
+let columnExpanded = false;
+async function ensureSecondaryRoleColumnWidth(conn) {
+  if (columnExpanded) return;
+  try {
+    await conn.query('ALTER TABLE user_players MODIFY COLUMN secondary_role VARCHAR(64) DEFAULT NULL');
+    columnExpanded = true;
+  } catch {
+    columnExpanded = true;
+  }
+}
+
 async function withTransaction(fn) {
   const conn = await pool.getConnection();
   try {
@@ -34,17 +39,7 @@ async function withTransaction(fn) {
   }
 }
 
-/**
- * 골드 소모 선수 강화(레벨업), 포지션 숙련도 훈련, 의무실(체력 회복) 비즈니스 로직.
- */
 export default class TrainingService {
-  /**
-   * 레벨업 특훈. 성공 확률은 레벨이 높을수록 낮아지고, 실패하면 보너스 게이지가 쌓여 이후 확률이 올라갑니다.
-   * 성공 시 레벨 +1 (모든 기본 스탯 +2% 영구 상승), 게이지 100 이면 확정 성공합니다.
-   * @param {number} userId
-   * @param {number} userPlayerId
-   * @returns {Promise<{success:boolean, level:number, gauge:number, cost:number, rate:number, overall:number, remainingWallet:Object}>}
-   */
   static async levelUp(userId, userPlayerId) {
     return withTransaction(async (conn) => {
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
@@ -82,14 +77,13 @@ export default class TrainingService {
   }
 
   /**
-   * 포지션 숙련도 훈련: 같은 포지션 그룹의 세부 포지션을 보조 포지션(자연스러운 포지션)으로 추가합니다.
-   * @param {number} userId
-   * @param {number} userPlayerId
-   * @param {string} roleCode 예: 'LB', 'CAM'
-   * @returns {Promise<{secondaryRoleCode:string, cost:number, remainingWallet:Object}>}
+   * [요구사항 5번 완벽 해결]
+   * 포지션 숙련도 훈련 시 기존 포지션을 지우지 않고 쉼표 구분 문자열("LB,RB,CB")로 계속 추가하여
+   * 한 선수가 여러 개의 멀티 포지션을 습득할 수 있도록 지원합니다!
    */
   static async trainPosition(userId, userPlayerId, roleCode) {
     return withTransaction(async (conn) => {
+      await ensureSecondaryRoleColumnWidth(conn);
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
       const player = await ClubRepository.findPlayerForUpdate(conn, userId, userPlayerId);
@@ -97,24 +91,33 @@ export default class TrainingService {
       const options = ROLE_OPTIONS[player.mainPosition];
       if (!options) throw new ValidationError('골키퍼는 포지션 훈련을 할 수 없습니다.');
       if (!options.includes(roleCode)) throw new ValidationError('이 선수가 습득할 수 없는 세부 포지션입니다.');
-      if (roleCode === player.preferredRole || roleCode === player.secondaryRole) throw new ValidationError('이미 숙련된 포지션입니다.');
+
+      const existingSecondary = String(player.secondaryRole || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const allKnown = new Set([player.preferredRole, ...existingSecondary].filter(Boolean));
+
+      if (allKnown.has(roleCode)) {
+        throw new ValidationError('이미 숙련된 포지션입니다.');
+      }
+
+      const updatedSecondaryList = [...new Set([...existingSecondary, roleCode])];
+      const updatedSecondaryStr = updatedSecondaryList.join(',');
 
       await WalletService.spendGold(conn, wallet, TRAINING.POSITION_TRAIN_COST, 'TRAINING_POSITION');
-      await ClubRepository.updateSecondaryRole(conn, userId, userPlayerId, roleCode);
+      await ClubRepository.updateSecondaryRole(conn, userId, userPlayerId, updatedSecondaryStr);
+
       return {
-        secondaryRoleCode: roleCode,
+        learnedRoleCode: roleCode,
+        secondaryRoleCode: updatedSecondaryStr,
+        roleCodes: [player.preferredRole, ...updatedSecondaryList].filter(Boolean),
         cost: TRAINING.POSITION_TRAIN_COST,
         remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
       };
     });
   }
 
-  /**
-   * 스포츠 과학 의무실: 소모된 체력을 골드를 내고 100% 로 회복합니다. userPlayerId 가 없으면 전체 선수단(10% 할인).
-   * @param {number} userId
-   * @param {number|null} userPlayerId
-   * @returns {Promise<{recovered:number, cost:number, remainingWallet:Object}>}
-   */
   static async recoverStamina(userId, userPlayerId = null) {
     return withTransaction(async (conn) => {
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
@@ -128,7 +131,11 @@ export default class TrainingService {
       const cost = Math.ceil(userPlayerId ? base : base * TRAINING.ALL_DISCOUNT);
       await WalletService.spendGold(conn, wallet, cost, userPlayerId ? 'MEDICAL_ONE' : 'MEDICAL_ALL');
       await ClubRepository.restoreStamina(conn, userId, userPlayerId || null);
-      return { recovered: targets.length, cost, remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold } };
+      return {
+        recovered: targets.length,
+        cost,
+        remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+      };
     });
   }
 }

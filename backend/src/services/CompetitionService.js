@@ -19,10 +19,6 @@ import { buildOpponent, emblemFor } from './OpponentFactory.js';
 
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
-/* ------------------------------------------------------------------ */
-/* 실제 축구 리그별 정확한 팀 개수 (20팀/18팀/24팀/12팀/14팀) 마스터 설정  */
-/* ------------------------------------------------------------------ */
-
 export const REAL_LEAGUE_CONFIGS = {
   EPL_1: {
     code: 'EPL_1',
@@ -273,9 +269,6 @@ export const REAL_LEAGUE_CONFIGS = {
   },
 };
 
-/**
- * 유저의 구단 이름과 division에 맞춰 실제 리그 설정(팀 수 20/18/24/12/14팀)을 자동 매칭합니다.
- */
 function detectLeagueConfigForClub(clubName = '', division = 1) {
   const clean = String(clubName).trim();
   for (const cfg of Object.values(REAL_LEAGUE_CONFIGS)) {
@@ -287,67 +280,49 @@ function detectLeagueConfigForClub(clubName = '', division = 1) {
       return cfg;
     }
   }
-  // 커스텀 구단명일 경우: 1부는 EPL(20팀), 2부는 챔피언십(24팀), 3부는 분데스리가(18팀) 규모로 배정
   if (division === 1) return REAL_LEAGUE_CONFIGS.EPL_1;
   if (division === 2) return REAL_LEAGUE_CONFIGS.EFL_2;
   return REAL_LEAGUE_CONFIGS.BUNDES_1;
 }
 
-/* ------------------------------------------------------------------ */
-/* 상대 팀 실제 스타 선수 이름 주입 헬퍼 (요구사항 21 해결)              */
-/* ------------------------------------------------------------------ */
-
-const REAL_OPPONENT_ROSTERS = {
-  '맨체스터 블루': ['에데르송', '카일 워커', '후벵 디아스', '요슈코 그바르디올', '로드리', '케빈 더 브라위너', '베르나르두 실바', '필 포든', '제레미 도쿠', '엘링 홀란드', '사비뉴'],
-  '노스 런던 레드': ['다비드 라야', '벤 화이트', '윌리엄 살리바', '가브리에우 마갈량이스', '율리엔 팀버', '데클란 라이스', '마르틴 외데고르', '토마스 파티', '부카요 사카', '가브리엘 마르티넬리', '카이 하베르츠'],
-  '머지사이드 레드': ['알리송 베케르', '트렌트 알렉산더아놀드', '버질 판 데이크', '이브라히마 코나테', '앤디 로버트슨', '알렉시스 맥 알리스터', '도미니크 소보슬라이', '라이언 흐라번베르흐', '모하메드 살라', '루이스 디아스', '다르윈 누녜스'],
-  '노스이스트 런던': ['굴리엘모 비카리오', '페드로 포로', '크리스티안 로메로', '미키 판 더 펜', '데스티니 우도기', '제임스 매디슨', '이브 비수마', '파페 사르', '데얀 쿨루셉스키', '손흥민', '도미닉 솔란케'],
-  '웨스트 런던 블루': ['로베르트 산체스', '리스 제임스', '리바이 콜윌', '웨슬리 포파나', '마르크 쿠쿠렐라', '모이세스 카이세도', '엔소 페르난데스', '콜 파머', '노니 마두에케', '페드로 네투', '니콜라스 잭슨'],
-  '맨체스터 레드': ['안드레 오나나', '디오구 달로트', '리산드로 마르티네스', '마테이스 더 리흐트', '누사이르 마즈라위', '코비 마이누', '카세미루', '브루노 페르난데스', '알레한드로 가르나초', '아마드 디알로', '라스무스 호일룬'],
-  '마드리드 화이트': ['티보 쿠르투아', '다니 카르바할', '안토니오 뤼디거', '에데르 밀리탕', '페를랑 멘디', '페데리코 발베르데', '오렐리앙 추아메니', '주드 벨링엄', '호드리구', '비니시우스 주니오르', '킬리안 음바페'],
-  '카탈루냐 블루레드': ['마르크안드레 테어 슈테겐', '쥘 쿤데', '파우 쿠바르시', '이니고 마르티네스', '알레한드로 발데', '페드리', '마르크 카사도', '다니 올모', '라민 야말', '하피냐', '로베르트 레반도프스키'],
-  '뮌헨 레드': ['마누엘 노이어', '조슈아 키미히', '김민재', '다요 우파메카노', '알폰소 데이비스', '알렉산다르 파블로비치', '자말 무시알라', '마이클 올리세', '세르주 그나브리', '킹슬리 코망', '해리 케인'],
-  '파리 블루레드': ['잔루이지 돈나룸마', '아슈라프 하키미', '마르키뉴스', '윌리안 파초', '누누 멘데스', '비티냐', '주앙 네베스', '워렌 자이르에메리', '이강인', '브래들리 바르콜라', '우스만 뎀벨레'],
-  '롬바르디아 블루블랙': ['얀 조머', '뱅자맹 파바르', '프란체스코 아체르비', '알레산드로 바스토니', '덴젤 둠프리스', '니콜로 바렐라', '하칸 찰하노글루', '헨리크 미키타리안', '페데리코 디마르코', '마르쿠스 튀랑', '라우타로 마르티네스'],
-  '울산 블루타이거즈': ['조현우', '설영우', '김영권', '황석호', '이명재', '고승범', '보야니치', '이청용', '엄원상', '루빅손', '주민규'],
-  '서울 블랙레드': ['강현무', '최준', '김주성', '야잔', '강상우', '기성용', '이승모', '제시 린가드', '조영욱', '윌리안', '일류첸코'],
-  '마이애미 핑크헤론즈': ['드레이크 캘린더', '마르셀로 웨이간트', '토마스 아빌레스', '조르디 알바', '세르히오 부스케츠', '페데리코 레돈도', '디에고 고메스', '마티아스 로하스', '리오넬 메시', '루이스 수아레스', '레오나르도 캄파나'],
-};
-
-const GLOBAL_REAL_PLAYER_NAMES_FALLBACK = [
-  '알렉산데르 이삭', '브루노 기마랑이스', '앤서니 고든', '올리 왓킨스', '유리 틸레만스', '미토마 가오루',
-  '황희찬', '마테우스 쿠냐', '자로드 보웬', '루카스 파케타', '에베레치 에제', '브라이언 음뵈모',
-  '배준호', '엄지성', '양민혁', '백승호', '이재성', '정우영', '플로리안 비르츠', '그라니트 자카',
-  '사비 시몬스', '세르후 기라시', '율리안 브란트', '앙투안 그리에즈만', '훌리안 알바레스', '니코 윌리엄스',
-  '쿠보 다케후사', '하파엘 레앙', '테오 에르난데스', '크리스티안 풀리식', '두산 블라호비치', '흐비차 크바라츠헬리아',
-  '세징야', '이동경', '정호연', '안데르송', '양민혁', '정상빈', '손준호', '김진수',
-];
-
-function enrichOpponentWithRealNames(oppObj) {
+function simulateOpponentFatigueAndRotation(oppObj, currentRound = 1) {
   if (!oppObj || !Array.isArray(oppObj.starters)) return oppObj;
-  const matchedKey = Object.keys(REAL_OPPONENT_ROSTERS).find((k) => String(oppObj.name || '').includes(k));
-  const rosterNames = matchedKey ? REAL_OPPONENT_ROSTERS[matchedKey] : null;
-  const usedNames = new Set();
+  const starters = oppObj.starters.map((p) => ({ ...p }));
+  const bench = Array.isArray(oppObj.bench) ? oppObj.bench.map((p) => ({ ...p })) : [];
 
-  oppObj.starters = oppObj.starters.map((p, idx) => {
-    let realName = rosterNames && rosterNames[idx] ? rosterNames[idx] : null;
-    if (!realName) {
-      const candidate = GLOBAL_REAL_PLAYER_NAMES_FALLBACK[(idx * 7 + (oppObj.strength || 75)) % GLOBAL_REAL_PLAYER_NAMES_FALLBACK.length];
-      realName = usedNames.has(candidate) ? `${candidate} (${p.mainPosition})` : candidate;
+  for (let i = 0; i < starters.length; i++) {
+    const starter = starters[i];
+    const isGk = starter.mainPosition === 'GK' || starter.preferredRoleCode === 'GK';
+    const hash = Math.abs((starter.name?.charCodeAt(0) || 10) * 17 + currentRound * 23 + i * 13);
+    const simulatedStamina = isGk
+      ? 82 + (hash % 18)
+      : Math.max(22, 100 - ((hash % 68) + (currentRound > 1 ? 10 : 0)));
+
+    starter.stamina = simulatedStamina;
+    starter.currentStamina = simulatedStamina;
+
+    if (simulatedStamina <= 30 && bench.length > 0) {
+      const benchIdx = bench.findIndex(
+        (b) => b.mainPosition === starter.mainPosition && (b.stamina ?? 100) > 70
+      );
+      if (benchIdx >= 0) {
+        const subIn = {
+          ...bench[benchIdx],
+          preferredRoleCode: starter.preferredRoleCode,
+          roleCodes: starter.roleCodes,
+          stamina: 92 + (hash % 8),
+          currentStamina: 92 + (hash % 8),
+        };
+        bench[benchIdx] = { ...starter };
+        starters[i] = subIn;
+      } else {
+        starter.stamina = 58;
+        starter.currentStamina = 58;
+      }
     }
-    usedNames.add(realName);
-    return {
-      ...p,
-      name: realName,
-      safeName: realName,
-    };
-  });
-  return oppObj;
+  }
+  return { ...oppObj, starters, bench };
 }
-
-/* ------------------------------------------------------------------ */
-/* 공통 시뮬레이션 헬퍼                                                  */
-/* ------------------------------------------------------------------ */
 
 function simulateScore(sA, sB, rng) {
   const ratio = clamp(sA / Math.max(40, sB), 0.55, 1.85);
@@ -418,21 +393,25 @@ function rankRows(rows) {
     .map((row, i) => ({ ...row, rank: i + 1, gd: row.gf - row.ga }));
 }
 
-/* ------------------------------------------------------------------ */
-/* 프로 리그 (실제 리그별 20팀/18팀/24팀/12팀/14팀 풀리그 및 승강제)      */
-/* ------------------------------------------------------------------ */
+function scaleReward(baseReward, tierLevel = 1) {
+  const mult = Math.pow(1.35, Math.max(0, tierLevel - 1));
+  return {
+    gold: Math.round((baseReward?.gold || 0) * mult),
+    cashFree: Math.round((baseReward?.cashFree || 0) * mult),
+  };
+}
 
 const leagueHandler = {
-  /**
-   * 유저 구단이 속한 리그에 맞춰 실제 팀 수(예: EPL 20팀=38R, 분데스 18팀=34R, 챔피언십 24팀=46R, K리그1 12팀=22R)로 생성합니다.
-   */
   create({ userId, club, prev }) {
     const season = prev ? prev.season + 1 : 1;
     const division = prev?.nextDivision ?? LEAGUE.START_DIVISION;
+    const prevTitles = prev?.titlesWon || 0;
+    const tierLevel = prev?.finalRank === 1 ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
+    const difficultyBoost = (tierLevel - 1) * 2;
     const rng = createRng(`league:${userId}:${season}:${division}`);
 
     const leagueCfg = detectLeagueConfigForClub(club.name, division);
-    const totalTeams = leagueCfg.teamCount; // 20, 24, 18, 12, 14 등
+    const totalTeams = leagueCfg.teamCount;
     const otherClubs = leagueCfg.clubs.filter(
       (c) => !String(club.name).includes(c.name) && !c.name.includes(String(club.name))
     );
@@ -456,11 +435,10 @@ const leagueHandler = {
         id,
         name: c.name,
         emblem: c.emblem || emblemFor(c.name),
-        strength: c.strength + rng.int(-2, 2),
+        strength: clamp(c.strength + difficultyBoost + rng.int(-2, 2), 55, 96),
       };
     });
 
-    // 라운드 로빈(Circle Method) 홈 & 어웨이 풀리그 대진표 생성: 총 (N - 1) * 2 라운드
     const ids = Object.keys(teams);
     const firstLeg = [];
     let arr = [...ids];
@@ -480,6 +458,8 @@ const leagueHandler = {
     return {
       season,
       division,
+      tierLevel,
+      titlesWon: prevTitles,
       leagueCode: leagueCfg.code,
       leagueTitle: leagueCfg.title,
       teamCount: totalTeams,
@@ -498,9 +478,10 @@ const leagueHandler = {
     const fixture = state.fixtures[safeRoundIdx].find(([h, a]) => h === 'USER' || a === 'USER');
     const oppId = fixture[0] === 'USER' ? fixture[1] : fixture[0];
     const opp = state.teams[oppId];
+    const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
     return {
       ref: `L:${state.season}:${state.round}`,
-      label: `${state.leagueTitle || `${state.division}부 리그`} ${state.round}/${state.totalRounds}라운드`,
+      label: `${state.leagueTitle || `${state.division}부 리그`}${tierNote} ${state.round}/${state.totalRounds}라운드`,
       opponentSpec: { seed: `league:${userId}:${state.season}:${state.round}`, name: opp.name, strength: opp.strength },
     };
   },
@@ -527,6 +508,7 @@ const leagueHandler = {
     const summary = {
       type: 'LEAGUE',
       leagueTitle: state.leagueTitle,
+      tierLevel: state.tierLevel || 1,
       round,
       totalRounds: state.totalRounds,
       rankBefore: before.rank,
@@ -540,15 +522,30 @@ const leagueHandler = {
     const finished = state.round > state.totalRounds;
     if (finished) {
       const rank = me.rank;
-      reward = LEAGUE.SEASON_REWARD[rank === 1 ? 1 : rank === 2 ? 2 : rank === 3 ? 3 : 'default'];
+      const baseReward =
+        rank === 1
+          ? { gold: 20000, cashFree: 350 }
+          : rank === 2
+          ? { gold: 12000, cashFree: 200 }
+          : rank <= 4
+          ? { gold: 8000, cashFree: 120 }
+          : rank <= 6
+          ? { gold: 5000, cashFree: 70 }
+          : { gold: 2500, cashFree: 30 };
+      reward = scaleReward(baseReward, state.tierLevel || 1);
       state.finalRank = rank;
+      if (rank === 1) state.titlesWon = (state.titlesWon || 0) + 1;
+
       const totalTeams = Object.keys(state.teams).length;
-      const relegateThreshold = Math.max(totalTeams - 2, LEAGUE.RELEGATE_RANK);
+      const isBundes = state.leagueCode === 'BUNDES_1' || totalTeams === 18 || totalTeams <= 14;
+      const relegateCount = isBundes ? 2 : 3;
+      const relegateThreshold = totalTeams - relegateCount + 1;
+
       state.nextDivision =
-        rank <= LEAGUE.PROMOTE_RANK
+        state.division > 1 && rank <= 2
           ? Math.max(1, state.division - 1)
-          : rank >= relegateThreshold
-          ? Math.min(3, state.division + 1)
+          : state.division === 1 && rank >= relegateThreshold
+          ? 2
           : state.division;
       summary.seasonEnd = {
         rank,
@@ -563,16 +560,13 @@ const leagueHandler = {
 
   overview(state, status) {
     const title = state.leagueTitle || `${state.division}부 리그`;
-    if (status === 'FINISHED') return `시즌 ${state.season} 종료 · ${title} ${state.finalRank}위`;
+    const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
+    if (status === 'FINISHED') return `시즌 ${state.season}${tierBadge} 종료 · ${title} ${state.finalRank}위`;
     const me = rankRows(Object.values(state.table)).find((r) => r.id === 'USER');
     const currentRound = Math.min(state.round, state.totalRounds);
-    return `${title} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위`;
+    return `${title}${tierBadge} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위`;
   },
 };
-
-/* ------------------------------------------------------------------ */
-/* 토너먼트 공통 엔진 (챔피언스 컵 / 월드컵 본선)                          */
-/* ------------------------------------------------------------------ */
 
 function pairUp(ids) {
   const matches = [];
@@ -644,28 +638,35 @@ function knockoutNext(userId, state, refPrefix, label) {
   const match = round.matches.find((m) => m.winner === null && (m.a === 'USER' || m.b === 'USER'));
   const oppId = match.a === 'USER' ? match.b : match.a;
   const opp = state.teams[oppId];
+  const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
   return {
     ref: `${refPrefix}:${state.roundIndex}`,
-    label: `${label} ${round.name}`,
+    label: `${label}${tierNote} ${round.name}`,
     opponentSpec: { seed: `${refPrefix}:${userId}:${state.roundIndex}:${oppId}`, name: opp.name, strength: opp.strength },
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* 챔피언스 컵                                                          */
-/* ------------------------------------------------------------------ */
-
 const cupHandler = {
-  create({ userId, club }) {
+  create({ userId, club, prev }) {
+    const tierLevel = prev?.champion === 'USER' ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
+    const titlesWon = (prev?.titlesWon || 0) + (prev?.champion === 'USER' ? 1 : 0);
+    const difficultyBoost = (tierLevel - 1) * 2;
     const rng = createRng(`cup:${userId}:${Math.floor(Date.now() / 4096)}`);
     const names = rng.shuffle(AI_CLUB_NAMES.CHAMPIONS_CUP);
     const teams = { USER: { id: 'USER', name: club.name, emblem: club.emblemIcon, strength: null } };
     names.forEach((name, i) => {
       const id = `T${i + 1}`;
-      teams[id] = { id, name, emblem: emblemFor(name), strength: rng.int(CUP.STRENGTH_RANGE[0], CUP.STRENGTH_RANGE[1]) };
+      teams[id] = {
+        id,
+        name,
+        emblem: emblemFor(name),
+        strength: clamp(rng.int(CUP.STRENGTH_RANGE[0], CUP.STRENGTH_RANGE[1]) + difficultyBoost, 65, 97),
+      };
     });
     const order = rng.shuffle(Object.keys(teams));
     return {
+      tierLevel,
+      titlesWon,
       teams,
       roundNames: CUP.ROUND_NAMES,
       rounds: [{ name: CUP.ROUND_NAMES[0], matches: pairUp(order) }],
@@ -683,25 +684,33 @@ const cupHandler = {
     const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng);
     const summary = {
       type: 'CUP',
+      tierLevel: state.tierLevel || 1,
       ...knockoutSummary(r.userMatch, r.roundName),
       advanced: r.userWon,
       champion: r.champion,
       eliminated: r.eliminated,
       rounds: state.rounds,
     };
-    const reward = r.userWon ? CUP.ROUND_WIN_REWARD[roundIndexBefore] : CUP.ELIMINATED_REWARD;
+    // 우승 시 대규모 챔피언 보너스 + 난이도 단계(tierLevel) 배율 적용!
+    const baseRoundReward = r.champion
+      ? { gold: 25000, cashFree: 400 }
+      : r.userWon
+      ? CUP.ROUND_WIN_REWARD[roundIndexBefore] || { gold: 4000, cashFree: 50 }
+      : CUP.ELIMINATED_REWARD;
+    const reward = scaleReward(baseRoundReward, state.tierLevel || 1);
     return { state, summary, reward, finished: r.champion || r.eliminated };
   },
 
   overview(state, status) {
-    if (status === 'FINISHED') return state.champion === 'USER' ? '🏆 챔피언스 컵 우승!' : `${state.eliminatedAt}에서 탈락`;
-    return `${state.rounds[state.roundIndex].name} 진행 중`;
+    const tierBadge = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
+    if (status === 'FINISHED') {
+      return state.champion === 'USER'
+        ? `🏆 챔피언스 컵 우승!${tierBadge} (다음 도전 시 난이도·보상 상승)`
+        : `${state.eliminatedAt}에서 탈락${tierBadge}`;
+    }
+    return `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
   },
 };
-
-/* ------------------------------------------------------------------ */
-/* 월드컵 (조별리그 + 토너먼트)                                          */
-/* ------------------------------------------------------------------ */
 
 const GROUP_MATCHDAYS = [
   [[0, 1], [2, 3]],
@@ -710,13 +719,21 @@ const GROUP_MATCHDAYS = [
 ];
 
 const worldCupHandler = {
-  create({ userId, club }) {
+  create({ userId, club, prev }) {
+    const tierLevel = prev?.champion === 'USER' ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
+    const titlesWon = (prev?.titlesWon || 0) + (prev?.champion === 'USER' ? 1 : 0);
+    const difficultyBoost = (tierLevel - 1) * 2;
     const rng = createRng(`wc:${userId}:${Math.floor(Date.now() / 4096)}`);
     const names = rng.shuffle(AI_CLUB_NAMES.WORLD_CUP);
     const teams = { USER: { id: 'USER', name: `${club.name} (국가대표)`, emblem: club.emblemIcon, strength: null } };
     names.forEach((name, i) => {
       const id = `T${i + 1}`;
-      teams[id] = { id, name, emblem: emblemFor(name), strength: rng.int(WORLD_CUP.STRENGTH_RANGE[0], WORLD_CUP.STRENGTH_RANGE[1]) };
+      teams[id] = {
+        id,
+        name,
+        emblem: emblemFor(name),
+        strength: clamp(rng.int(WORLD_CUP.STRENGTH_RANGE[0], WORLD_CUP.STRENGTH_RANGE[1]) + difficultyBoost, 70, 97),
+      };
     });
     const aiIds = rng.shuffle(Object.keys(teams).filter((id) => id !== 'USER'));
     const groups = {};
@@ -724,6 +741,8 @@ const worldCupHandler = {
       groups[g] = gi === 0 ? ['USER', ...aiIds.slice(0, 3)] : aiIds.slice(3 + (gi - 1) * 4, 3 + gi * 4);
     });
     return {
+      tierLevel,
+      titlesWon,
       teams,
       groups,
       table: Object.fromEntries(Object.keys(teams).map((id) => [id, newRow(teams[id])])),
@@ -741,9 +760,10 @@ const worldCupHandler = {
     if (state.phase === 'KNOCKOUT') return knockoutNext(userId, state, 'WK', '월드컵');
     const oppId = state.groups.A[state.matchday];
     const opp = state.teams[oppId];
+    const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
     return {
       ref: `WG:${state.matchday}`,
-      label: `월드컵 조별리그 ${state.matchday}차전`,
+      label: `월드컵${tierNote} 조별리그 ${state.matchday}차전`,
       opponentSpec: { seed: `wg:${userId}:${state.matchday}`, name: opp.name, strength: opp.strength },
     };
   },
@@ -756,16 +776,22 @@ const worldCupHandler = {
       const summary = {
         type: 'WORLD_CUP',
         phase: 'KNOCKOUT',
+        tierLevel: state.tierLevel || 1,
         ...knockoutSummary(r.userMatch, r.roundName),
         advanced: r.userWon,
         champion: r.champion,
         eliminated: r.eliminated,
         rounds: state.rounds,
       };
+      const baseKoReward = r.champion
+        ? { gold: 35000, cashFree: 500 }
+        : r.userWon
+        ? WORLD_CUP.KNOCKOUT_REWARD[before] || { gold: 6000, cashFree: 80 }
+        : WORLD_CUP.ELIMINATED_REWARD;
       return {
         state,
         summary,
-        reward: r.userWon ? WORLD_CUP.KNOCKOUT_REWARD[before] : WORLD_CUP.ELIMINATED_REWARD,
+        reward: scaleReward(baseKoReward, state.tierLevel || 1),
         finished: r.champion || r.eliminated,
       };
     }
@@ -794,6 +820,7 @@ const worldCupHandler = {
     const summary = {
       type: 'WORLD_CUP',
       phase: 'GROUP',
+      tierLevel: state.tierLevel || 1,
       matchday: md,
       results,
       groupStandings,
@@ -806,7 +833,7 @@ const worldCupHandler = {
     if (!summary.advanced) {
       state.eliminatedAt = '조별리그';
       state.champion = advancers.A[0];
-      return { state, summary, reward: WORLD_CUP.ELIMINATED_REWARD, finished: true };
+      return { state, summary, reward: scaleReward(WORLD_CUP.ELIMINATED_REWARD, state.tierLevel || 1), finished: true };
     }
     const order = [
       advancers.A[0],
@@ -821,18 +848,19 @@ const worldCupHandler = {
     state.phase = 'KNOCKOUT';
     state.rounds = [{ name: WORLD_CUP.KNOCKOUT_NAMES[0], matches: pairUp(order) }];
     state.roundIndex = 0;
-    return { state, summary, reward: WORLD_CUP.GROUP_ADVANCE_REWARD, finished: false };
+    return { state, summary, reward: scaleReward(WORLD_CUP.GROUP_ADVANCE_REWARD, state.tierLevel || 1), finished: false };
   },
 
   overview(state, status) {
-    if (status === 'FINISHED') return state.champion === 'USER' ? '🏆 월드컵 우승!' : `${state.eliminatedAt}에서 탈락`;
-    return state.phase === 'GROUP' ? `조별리그 ${state.matchday}/3차전` : `${state.rounds[state.roundIndex].name} 진행 중`;
+    const tierBadge = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
+    if (status === 'FINISHED') {
+      return state.champion === 'USER'
+        ? `🏆 월드컵 우승!${tierBadge} (다음 도전 시 난이도·보상 상승)`
+        : `${state.eliminatedAt}에서 탈락${tierBadge}`;
+    }
+    return state.phase === 'GROUP' ? `조별리그 ${state.matchday}/3차전${tierBadge}` : `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
   },
 };
-
-/* ------------------------------------------------------------------ */
-/* 시나리오 챌린지 타워                                                 */
-/* ------------------------------------------------------------------ */
 
 function objectiveMet(objective, home, away) {
   switch (objective.type) {
@@ -853,7 +881,6 @@ const towerHandler = {
   create() {
     return { cleared: [], attempts: 0 };
   },
-
   next(userId, state, stageId) {
     const stage = TOWER_STAGES.find((s) => s.id === Number(stageId));
     if (!stage) throw new ValidationError('존재하지 않는 스테이지입니다.');
@@ -875,7 +902,6 @@ const towerHandler = {
       },
     };
   },
-
   apply({ state, stageId, userGoals, oppGoals }) {
     const stage = TOWER_STAGES.find((s) => s.id === Number(stageId));
     const met = objectiveMet(stage.objective, userGoals, oppGoals);
@@ -899,15 +925,10 @@ const towerHandler = {
       finished: false,
     };
   },
-
   overview(state) {
     return `${state.cleared.length}/${TOWER_STAGES.length} 스테이지 클리어`;
   },
 };
-
-/* ------------------------------------------------------------------ */
-/* 랭크 매치                                                           */
-/* ------------------------------------------------------------------ */
 
 function tierOf(rp) {
   let index = 0;
@@ -921,7 +942,6 @@ const rankedHandler = {
   create() {
     return { rp: RANKED.START_RP, wins: 0, draws: 0, losses: 0, matches: 0, streak: 0, history: [] };
   },
-
   next(userId, state) {
     const rng = createRng(`ranked:${userId}:${state.matches}`);
     const { index } = tierOf(state.rp);
@@ -935,7 +955,6 @@ const rankedHandler = {
       oppTierIndex: oppIndex,
     };
   },
-
   apply({ userId, state, userGoals, oppGoals }) {
     const info = rankedHandler.next(userId, state);
     const before = tierOf(state.rp);
@@ -974,7 +993,6 @@ const rankedHandler = {
       finished: false,
     };
   },
-
   overview(state) {
     const { tier } = tierOf(state.rp);
     return `${tier.label} · ${state.rp} RP · ${state.wins}승 ${state.draws}무 ${state.losses}패`;
@@ -1047,8 +1065,9 @@ export default class CompetitionService {
         throw new ConflictError('진행 중인 대회가 있습니다. 새로 시작하려면 기존 진행을 포기해야 합니다.');
       }
       const club = await ClubRepository.findClub(conn, userId);
-      const prev = existing && existing.status === 'FINISHED' ? existing.state : null;
-      const state = handler.create({ userId, club, prev: mode === 'LEAGUE' ? prev : null });
+      // [요구사항 6번 해결] 리그뿐만 아니라 챔피언스컵, 월드컵도 이전 상태(prev)를 전달하여 우승 후 재시작 시 난이도·보상 단계가 상승하도록 연결!
+      const prev = existing ? existing.state : null;
+      const state = handler.create({ userId, club, prev });
       await ClubRepository.saveCompetition(conn, userId, mode, 'ACTIVE', state);
       await conn.commit();
     } catch (err) {
@@ -1068,14 +1087,14 @@ export default class CompetitionService {
     const spec = info.opponentSpec;
     const strength = spec.strength ?? (await userTeamStrength(null, userId));
     const rawOpponent = buildOpponent({ ...spec, strength });
-    // 상대 구단 선수들을 실제 선수 실명 로스터로 매핑하여 중복/가짜 이름 제거
-    const enrichedOpponent = enrichOpponentWithRealNames(rawOpponent);
+    const currentRound = row.state?.round || row.state?.matchday || 1;
+    const readyOpponent = simulateOpponentFatigueAndRotation(rawOpponent, currentRound);
     return {
       mode,
       ref: info.ref,
       label: info.label,
       stageId: info.stageId ?? null,
-      opponent: enrichedOpponent,
+      opponent: readyOpponent,
       scenario: info.scenario || null,
     };
   }

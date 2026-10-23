@@ -16,8 +16,37 @@ import {
 } from '../constants/tacticsConfig.js';
 import { computeEffectiveStats } from '../utils/playerStats.js';
 
+const BENCH_STORAGE_KEY = 'pfm_saved_bench_ids_v1';
+
+function saveBenchBackup(benchIds) {
+  try {
+    if (Array.isArray(benchIds) && benchIds.length > 0) {
+      localStorage.setItem(BENCH_STORAGE_KEY, JSON.stringify(benchIds));
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadBenchBackup() {
+  try {
+    const raw = localStorage.getItem(BENCH_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed.map(Number).filter((n) => n > 0) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function normalizePlayer(raw, side, backNumber) {
-  const roleCodes = raw.roleCodes && raw.roleCodes.length ? raw.roleCodes : [raw.preferredRoleCode, raw.secondaryRoleCode].filter(Boolean);
+  // [요구사항 5번 반영] secondaryRole 에 쉼표로 여러 포지션("CM,CAM,RM")이 저장되어 있어도 모두 파싱하여 roleCodes 에 포함!
+  const extraRoles = String(raw.secondaryRoleCode || raw.secondaryRole || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const baseRoles = Array.isArray(raw.roleCodes) ? raw.roleCodes : [];
+  const mergedRoles = [...new Set([raw.preferredRoleCode, ...baseRoles, ...extraRoles].filter(Boolean))];
+
   return {
     id: `${side}-${raw.userPlayerId}`,
     side,
@@ -25,9 +54,9 @@ export function normalizePlayer(raw, side, backNumber) {
     playerId: raw.playerId,
     name: raw.name,
     mainPosition: raw.mainPosition,
-    preferredRoleCode: raw.preferredRoleCode || null,
-    secondaryRoleCode: raw.secondaryRoleCode || null,
-    roleCodes,
+    preferredRoleCode: raw.preferredRoleCode || mergedRoles[0] || raw.mainPosition,
+    secondaryRoleCode: extraRoles.join(',') || null,
+    roleCodes: mergedRoles,
     level: Number(raw.level || 1),
     exp: Number(raw.exp || 0),
     stamina: Number(raw.stamina ?? 100),
@@ -51,9 +80,9 @@ function toBenchPlayer(player) {
     ...player,
     slotIndex: null,
     slotRoleGroup: player.mainPosition,
-    slotRoleCode: player.mainPosition,
+    slotRoleCode: player.preferredRoleCode || player.mainPosition,
     role: player.mainPosition,
-    label: player.mainPosition,
+    label: player.preferredRoleCode || player.mainPosition,
     baseX: 50,
     baseY: 50,
     naturalPosition: player.mainPosition,
@@ -63,21 +92,108 @@ function toBenchPlayer(player) {
   };
 }
 
+/**
+ * [요구사항 7번 완벽 구현]
+ * 남은 선수 풀(pool)에서 다음 11명의 황금 밸런스 후보(벤치) 구성을 OVR 높은 순으로 자동 선발합니다:
+ * - GK 1명
+ * - 풀백 2명 (LB/LWB 1명, RB/RWB 1명)
+ * - 센터백 2명 (CB/LCB/RCB 2명)
+ * - 윙어 2명 (LW/LM 1명, RW/RM 1명)
+ * - 중앙 미드필더 2명 (CM/CDM/CAM 2명)
+ * - 공격수 2명 (ST/CF/LST/RST 2명)
+ */
+export function pickBalancedBench11(pool) {
+  const remaining = [...pool].sort((a, b) => (b.overall || 0) - (a.overall || 0));
+  const picked = [];
+
+  const takeMatching = (predicate, count) => {
+    for (let c = 0; c < count; c++) {
+      const idx = remaining.findIndex(predicate);
+      if (idx >= 0) {
+        picked.push(remaining.splice(idx, 1)[0]);
+      }
+    }
+  };
+
+  const hasRole = (p, roles) =>
+    roles.includes(p.preferredRoleCode) || (Array.isArray(p.roleCodes) && p.roleCodes.some((r) => roles.includes(r)));
+
+  // 1. GK 1명
+  takeMatching((p) => p.mainPosition === 'GK', 1);
+  // 2. 좌측 풀백 1명, 우측 풀백 1명 (부족 시 일반 DF로 대체)
+  takeMatching((p) => p.mainPosition === 'DF' && hasRole(p, ['LB', 'LWB']), 1);
+  takeMatching((p) => p.mainPosition === 'DF' && hasRole(p, ['RB', 'RWB']), 1);
+  // 3. 센터백 2명
+  takeMatching((p) => p.mainPosition === 'DF' && hasRole(p, ['CB', 'LCB', 'RCB']), 2);
+  // 만약 DF가 아직 4명 미만이면 남은 DF 중에서 채움
+  const currentDfCount = picked.filter((p) => p.mainPosition === 'DF').length;
+  if (currentDfCount < 4) {
+    takeMatching((p) => p.mainPosition === 'DF', 4 - currentDfCount);
+  }
+  // 4. 좌측 윙어 1명, 우측 윙어 1명
+  takeMatching((p) => hasRole(p, ['LW', 'LM']), 1);
+  takeMatching((p) => hasRole(p, ['RW', 'RM']), 1);
+  // 5. 중앙 미드필더(CM/CDM/CAM) 2명
+  takeMatching((p) => p.mainPosition === 'MF' && hasRole(p, ['CM', 'CDM', 'CAM', 'LCM', 'RCM']), 2);
+  const currentMfCount = picked.filter((p) => p.mainPosition === 'MF').length;
+  if (currentMfCount < 3) {
+    takeMatching((p) => p.mainPosition === 'MF', 3 - currentMfCount);
+  }
+  // 6. 최전방 스트라이커(ST) 2명
+  takeMatching((p) => p.mainPosition === 'FW' && hasRole(p, ['ST', 'LST', 'RST', 'CF']), 2);
+  // 7. 11명이 안 찼다면 남은 선수 중 OVR 최고 순으로 11명까지 채움
+  while (picked.length < 11 && remaining.length > 0) {
+    picked.push(remaining.shift());
+  }
+
+  return {
+    bench: picked.slice(0, 11).map(toBenchPlayer),
+    reserve: remaining.map(toBenchPlayer),
+  };
+}
+
 function buildSquadState(data) {
   const formation = FORMATIONS[data.formation] ? data.formation : DEFAULT_FORMATION;
   const slots = getFormationSlots(formation);
   let number = 0;
   const normalize = (raw) => normalizePlayer(raw, 'HOME', ++number);
   const starterPlayers = data.starters.slice(0, 11).map(normalize);
-  const bench = data.bench.map(normalize).map(toBenchPlayer);
-  const reserve = data.reserve.map(normalize).map(toBenchPlayer);
-  const arranged = starterPlayers.length === 11 ? starterPlayers : assignPlayersByFamiliarity(starterPlayers, slots).filter(Boolean);
+
+  const rawBench = (data.bench || []).map(normalize).map(toBenchPlayer);
+  const rawReserve = (data.reserve || []).map(normalize).map(toBenchPlayer);
+  const allNonStarters = [...rawBench, ...rawReserve];
+
+  // [요구사항 2번 해결] 사용자가 저장해둔 후보 백업(localStorage)이 있으면 최우선 복원하여 절대 초기화되지 않도록 보장!
+  const backupIds = loadBenchBackup();
+  let finalBench = rawBench;
+  let finalReserve = rawReserve;
+
+  if (backupIds && backupIds.length > 0) {
+    const byId = new Map(allNonStarters.map((p) => [Number(p.userPlayerId), p]));
+    const restoredBench = [];
+    for (const id of backupIds) {
+      if (byId.has(id)) {
+        restoredBench.push(byId.get(id));
+        byId.delete(id);
+      }
+    }
+    if (restoredBench.length > 0) {
+      finalBench = restoredBench;
+      finalReserve = [...byId.values()];
+    }
+  }
+
+  const arranged =
+    starterPlayers.length === 11
+      ? starterPlayers
+      : assignPlayersByFamiliarity(starterPlayers, slots).filter(Boolean);
+
   return {
     formation,
     teamTactics: { ...DEFAULT_TEAM_TACTICS, ...(data.teamTactics || {}) },
     starters: arranged.map((p, i) => toStarter(p, slots[i])),
-    bench,
-    reserve,
+    bench: finalBench,
+    reserve: finalReserve,
   };
 }
 
@@ -93,11 +209,18 @@ export const useSquadStore = create((set, get) => ({
   dirty: false,
   error: null,
 
-  loadSquad: async () => {
+  loadSquad: async (force = false) => {
+    const state = get();
+    // 이미 로드되어 있고 강제 새로고침이 아니면 현재 메모리의 스쿼드+후보 명단을 그대로 유지! (페이지 이동 시 후보 초기화 원천 차단)
+    if (state.loaded && state.starters.length === 11 && !force) {
+      return true;
+    }
     set({ isLoading: true, error: null });
     try {
       const data = await fetchLineup();
-      set({ ...buildSquadState(data), loaded: true, isLoading: false, dirty: false });
+      const nextState = buildSquadState(data);
+      saveBenchBackup(nextState.bench.map((p) => p.userPlayerId));
+      set({ ...nextState, loaded: true, isLoading: false, dirty: false });
       return true;
     } catch (err) {
       set({ isLoading: false, error: errorMessage(err) });
@@ -112,19 +235,61 @@ export const useSquadStore = create((set, get) => ({
     try {
       const instructions = {};
       for (const p of starters) if (p.instruction) instructions[p.userPlayerId] = p.instruction;
+      const benchIds = bench.map((p) => p.userPlayerId);
+      saveBenchBackup(benchIds);
       await saveLineup({
         formation,
         teamTactics,
         starterIds: starters.map((p) => p.userPlayerId),
-        benchIds: bench.map((p) => p.userPlayerId),
+        benchIds,
         instructions,
       });
       set({ isSaving: false, dirty: false });
-      return { success: true, message: '라인업과 전술을 저장했습니다.' };
+      return { success: true, message: '라인업과 후보 명단(벤치)을 저장했습니다.' };
     } catch (err) {
       set({ isSaving: false });
       return { success: false, message: errorMessage(err, '라인업 저장에 실패했습니다.') };
     }
+  },
+
+  /**
+   * [요구사항 7번 해결] 후보(벤치) 11명만 포지션별 최고 OVR(GK 1, 풀백 2, CB 2, 윙어 2, 중미 2, 공격수 2)로 자동 완성!
+   */
+  autoFillBench: () => {
+    const { bench, reserve } = get();
+    const result = pickBalancedBench11([...bench, ...reserve]);
+    saveBenchBackup(result.bench.map((p) => p.userPlayerId));
+    set({ bench: result.bench, reserve: result.reserve, dirty: true });
+    return {
+      success: true,
+      message: '⚡ 후보 11명 자동완성 완료! (GK 1 · 좌우 풀백 2 · 센터백 2 · 좌우 윙어 2 · 중미 2 · 공격수 2 최고 OVR 선발)',
+    };
+  },
+
+  /**
+   * [요구사항 7번 해결] 선발 11명 + 후보 11명(총 22명)을 한 번에 포지션별 최고 능력치 선수로 자동 완성!
+   */
+  autoFillAll: () => {
+    const { formation, starters, bench, reserve } = get();
+    const slots = getFormationSlots(formation);
+    const allPlayers = [...starters, ...bench, ...reserve].sort((a, b) => (b.overall || 0) - (a.overall || 0));
+
+    const pickedStarters = assignPlayersByFamiliarity(allPlayers, slots).filter(Boolean);
+    const starterIdsSet = new Set(pickedStarters.map((p) => p.userPlayerId));
+    const remainingPool = allPlayers.filter((p) => !starterIdsSet.has(p.userPlayerId));
+    const { bench: nextBench, reserve: nextReserve } = pickBalancedBench11(remainingPool);
+
+    saveBenchBackup(nextBench.map((p) => p.userPlayerId));
+    set({
+      starters: pickedStarters.map((p, i) => toStarter(p, slots[i])),
+      bench: nextBench,
+      reserve: nextReserve,
+      dirty: true,
+    });
+    return {
+      success: true,
+      message: '✨ 선발 베스트 11 + 포지션별 맞춤 후보 11명(총 22명) 자동 라인업 편성이 완료되었습니다!',
+    };
   },
 
   changeFormation: (code) => {
@@ -196,6 +361,7 @@ export const useSquadStore = create((set, get) => ({
       const nextBench = [...bench];
       nextBench[benchIndex] = toBenchPlayer(out);
       patch.bench = nextBench;
+      saveBenchBackup(nextBench.map((p) => p.userPlayerId));
     } else {
       const nextReserve = [...reserve];
       nextReserve[reserveIndex] = toBenchPlayer(out);
@@ -204,7 +370,7 @@ export const useSquadStore = create((set, get) => ({
     set(patch);
     return {
       success: true,
-      message: `🔄 선수 교체: IN ${placed.name}(${placed.slotRoleCode}, ${FAMILIARITY_META[placed.familiarity].label}) / OUT ${out.name} (경기 전에는 교체 횟수가 차감되지 않습니다)`,
+      message: `🔄 선수 교체: IN ${placed.name}(${placed.slotRoleCode}, ${FAMILIARITY_META[placed.familiarity].label}) / OUT ${out.name}`,
     };
   },
 
@@ -216,12 +382,22 @@ export const useSquadStore = create((set, get) => ({
     const nextBench = [...bench];
     const nextReserve = [...reserve];
     [nextBench[bi], nextReserve[ri]] = [nextReserve[ri], nextBench[bi]];
+    saveBenchBackup(nextBench.map((p) => p.userPlayerId));
     set({ bench: nextBench, reserve: nextReserve, dirty: true });
     return { success: true, message: `🔄 벤치 변경: ${nextBench[bi].name} 이(가) 벤치에 합류했습니다.` };
   },
 
   reset: () =>
-    set({ formation: DEFAULT_FORMATION, teamTactics: { ...DEFAULT_TEAM_TACTICS }, starters: [], bench: [], reserve: [], loaded: false, dirty: false, error: null }),
+    set({
+      formation: DEFAULT_FORMATION,
+      teamTactics: { ...DEFAULT_TEAM_TACTICS },
+      starters: [],
+      bench: [],
+      reserve: [],
+      loaded: false,
+      dirty: false,
+      error: null,
+    }),
 }));
 
 export default useSquadStore;

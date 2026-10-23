@@ -6,10 +6,12 @@ import RarityBadge from '../components/common/RarityBadge.jsx';
 import StatRadar from '../components/common/StatRadar.jsx';
 import { POSITION_LABELS } from '../constants/gameConfig.js';
 
+// [요구사항 8번 해결] 알파벳순(DF-FW-GK-MF) 꼬임을 방지하는 축구 표준 포지션 순서 가중치
+const POSITION_ORDER_WEIGHT = { FW: 1, MF: 2, DF: 3, GK: 4 };
+
 const FIELD_COLUMNS = [
   { key: 'goals', label: '득점', get: (p) => p.stats?.goals || 0 },
   { key: 'assists', label: '도움', get: (p) => p.stats?.assists || 0 },
-  // [요구사항 17 해결] 기록실 표시 시에도 유효슈팅이 득점보다 적게 표시되는 구 데이터 자동 보정
   { key: 'shotsOnTarget', label: '유효슈팅', get: (p) => Math.max(p.stats?.goals || 0, p.stats?.shotsOnTarget || 0) },
 ];
 const GK_COLUMNS = [
@@ -28,7 +30,6 @@ const TAIL_COLUMNS = [
   { key: 'avgRating', label: '평균 평점', get: (p) => p.stats?.avgRating || 0 },
 ];
 
-// [요구사항 20 해결] 포지션별 세분화 필터 (전체 / 공격수 FW / 미드필더 MF / 수비수 DF / 골키퍼 GK)
 const FILTERS = [
   { id: 'ALL', label: '전체' },
   { id: 'FW', label: '공격수 (FW)' },
@@ -48,7 +49,8 @@ const STAT_LABELS_KO = [
 ];
 
 function getPlayerAvatarUrl(player) {
-  if (player?.photoUrl || player?.imageUrl) return player.photoUrl || player.imageUrl;
+  const customUrl = player?.photoUrl || player?.imageUrl || player?.baseStats?.photoUrl;
+  if (customUrl) return customUrl;
   const seed = encodeURIComponent(player?.name || `player_${player?.userPlayerId || 1}`);
   return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}&backgroundColor=1e293b`;
 }
@@ -58,7 +60,7 @@ export default function PlayerStatsRecordPage() {
   const record = useClubStore((s) => s.record);
   const refreshPlayers = useClubStore((s) => s.refreshPlayers);
   const [filter, setFilter] = useState('ALL');
-  const [sort, setSort] = useState({ key: 'overall', dir: 'desc' });
+  const [sort, setSort] = useState({ key: 'position', dir: 'asc' });
   const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
@@ -69,14 +71,16 @@ export default function PlayerStatsRecordPage() {
   const columns = useMemo(() => [...BASE_COLUMNS, ...specific, ...TAIL_COLUMNS], [specific]);
 
   const rows = useMemo(() => {
-    const filtered = players.filter((p) => {
-      if (filter === 'ALL') return true;
-      return p.mainPosition === filter;
-    });
+    const filtered = players.filter((p) => (filter === 'ALL' ? true : p.mainPosition === filter));
     const column = columns.find((c) => c.key === sort.key);
     const sorted = [...filtered].sort((a, b) => {
       if (sort.key === 'name') return a.name.localeCompare(b.name, 'ko');
-      if (sort.key === 'position') return a.mainPosition.localeCompare(b.mainPosition);
+      if (sort.key === 'position') {
+        const wA = POSITION_ORDER_WEIGHT[a.mainPosition] || 99;
+        const wB = POSITION_ORDER_WEIGHT[b.mainPosition] || 99;
+        if (wA !== wB) return wA - wB;
+        return (b.overall || 0) - (a.overall || 0);
+      }
       return column ? column.get(a) - column.get(b) : 0;
     });
     return sort.dir === 'desc' ? sorted.reverse() : sorted;
@@ -85,7 +89,9 @@ export default function PlayerStatsRecordPage() {
   const selected = players.find((p) => p.userPlayerId === selectedId) || rows[0] || null;
 
   const toggleSort = (key) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
+    setSort((s) =>
+      s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: key === 'position' ? 'asc' : 'desc' }
+    );
 
   const header = (col) => (
     <th
@@ -104,7 +110,7 @@ export default function PlayerStatsRecordPage() {
     <div className="space-y-4" data-testid="records-page">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Panel
-          title="선수 기록실 (포지션별 필터 & 정렬)"
+          title="선수 기록실 (포지션 순서 정렬: FW → MF → DF → GK)"
           className="xl:col-span-2"
           right={
             <div className="flex flex-wrap overflow-hidden rounded-lg border border-slate-700">
@@ -140,7 +146,11 @@ export default function PlayerStatsRecordPage() {
                     선수
                   </th>
                   <th className="cursor-pointer px-2 py-2 text-center hover:text-white" onClick={() => toggleSort('position')}>
-                    포지션
+                    <span className="inline-flex items-center gap-0.5">
+                      포지션
+                      {sort.key === 'position' &&
+                        (sort.dir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />)}
+                    </span>
                   </th>
                   {columns.map(header)}
                 </tr>
@@ -174,13 +184,6 @@ export default function PlayerStatsRecordPage() {
                     ))}
                   </tr>
                 ))}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={columns.length + 2} className="py-6 text-center text-slate-500">
-                      표시할 선수가 없습니다.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
@@ -207,7 +210,6 @@ export default function PlayerStatsRecordPage() {
 
               <StatRadar stats={selected.effectiveStats} baseStats={selected.baseStats} />
 
-              {/* [요구사항 49 완벽 해결] 그래프뿐만 아니라 구체적인 능력치 수치(예: 골 결정력 88)를 명확히 표시 */}
               <div className="w-full space-y-1.5 rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                 <p className="mb-2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   <UserCheck className="h-3.5 w-3.5 text-blue-400" /> 세부 능력치 수치 (Effective Stats)
@@ -234,12 +236,6 @@ export default function PlayerStatsRecordPage() {
                   );
                 })}
               </div>
-
-              <p className="text-[11px] text-slate-400">
-                현재 체력 <b className="text-emerald-300">{Math.round(selected.stamina)}%</b> · 출전{' '}
-                {selected.stats?.matchesPlayed || 0}경기 · 평균 평점{' '}
-                {selected.stats?.matchesPlayed ? selected.stats.avgRating.toFixed(2) : '-'}
-              </p>
             </div>
           ) : (
             <p className="py-8 text-center text-sm text-slate-500">선수를 선택하세요.</p>

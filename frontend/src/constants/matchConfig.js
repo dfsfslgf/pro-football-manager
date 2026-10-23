@@ -1,21 +1,24 @@
 /** 1배속 기준 1분(Tick)이 흐르는 시간(ms) */
 export const TICK_BASE_MS = 500;
 
-/** 라이브 경기 시뮬레이션 규칙. 실력 차이가 결과에 과도하게 반영되지 않도록 점유/슈팅 민감도와 슈팅 난수 폭이 보정되어 있습니다. */
+/**
+ * [요구사항 14번 해결] 최대 교체 인원을 현대 축구 규정과 동일한 5명(MAX_SUBSTITUTIONS: 5)으로 상향
+ */
 export const MATCH_RULES = {
   MATCH_MINUTES: 90,
   HALF_TIME_MINUTE: 45,
-  MAX_SUBSTITUTIONS: 3,
+  MAX_SUBSTITUTIONS: 5,
+  BENCH_SIZE: 11,
   MIN_STAMINA: 5,
   STAMINA_DEBUFF_THRESHOLD: 30,
   EXHAUSTED_STAMINA: 30,
-  PLAN_B_ROTATION_STAMINA: 25,
-  PLAN_B_ROTATION_MINUTE: 65,
+  PLAN_B_ROTATION_STAMINA: 30,
+  PLAN_B_ROTATION_MINUTE: 60,
   ALL_IN_MINUTE: 80,
   HOME_ADVANTAGE: 1.05,
   SCENE_CHANCE: 0.4,
-  FOUL_SCENE_CHANCE: 0.06,
-  CARD_CHANCE: 0.45,
+  FOUL_SCENE_CHANCE: 0.04,
+  CARD_CHANCE: 0.28,
   GOAL_THRESHOLD: 1.2,
   BASE_TICK_DRAIN_MIN: 0.52,
   BASE_TICK_DRAIN_RANGE: 0.16,
