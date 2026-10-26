@@ -230,15 +230,24 @@ export const TEAM_TACTIC_GROUPS = [
       { value: 'HIGH', label: '게겐프레싱' },
     ],
   },
+  {
+      key: 'offsideTrap',
+      label: '오프사이드 트랩',
+      options: [
+        { value: 'OFF', label: '사용 안 함 (안전 커버)' },
+        { value: 'ON', label: '트랩 가동 (일제 전진)' },
+      ],
+    },  
 ];
 
-export const DEFAULT_TEAM_TACTICS = Object.freeze({
+export const DEFAULT_TEAM_TACTICS = {
   mentality: 'BALANCED',
   passingStyle: 'MIXED',
   tempo: 'NORMAL',
   defensiveLine: 'NORMAL',
   pressing: 'MEDIUM',
-});
+  offsideTrap: 'OFF',
+};
 
 /**
  * 팀 전술 옵션별 수치 효과.
@@ -276,9 +285,20 @@ export const TEAM_TACTIC_EFFECTS = Object.freeze({
   },
 });
 
-export const TEAM_TACTIC_LABELS = Object.freeze(
-  Object.fromEntries(TEAM_TACTIC_GROUPS.map((g) => [g.key, Object.fromEntries(g.options.map((o) => [o.value, o.label]))]))
-);
+export const TEAM_TACTIC_LABELS = {
+  mentality: {
+    PARK_THE_BUS: '극단적 수비',
+    DEFENSIVE: '수비적',
+    BALANCED: '균형',
+    ATTACKING: '공격적',
+    ALL_OUT_ATTACK: '총공세',
+  },
+  passingStyle: { SHORT: '짧은 패스', MIXED: '혼합', DIRECT_LONG: '직선적 롱패스' },
+  tempo: { SLOW: '느림', NORMAL: '보통', FAST: '빠름' },
+  defensiveLine: { DEEP: '깊숙이 내림', NORMAL: '보통', HIGH: '높게 올림' },
+  pressing: { LOW: '낮음', MEDIUM: '보통', HIGH: '강한 압박' },
+  offsideTrap: { OFF: '사용 안 함 (뒷공간 커버)', ON: '활성화 (라인 일제 전진)' }, // 👈 추가
+};
 
 /**
  * 팀 전술 객체에서 그룹별 효과 테이블 항목을 조회합니다. (알 수 없는 값은 기본값으로 대체)

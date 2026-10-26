@@ -71,7 +71,9 @@ export const GAME_RULES = Object.freeze({
     tempo: Object.freeze(['SLOW', 'NORMAL', 'FAST']),
     defensiveLine: Object.freeze(['DEEP', 'NORMAL', 'HIGH']),
     pressing: Object.freeze(['LOW', 'MEDIUM', 'HIGH']),
+    offsideTrap: Object.freeze(['OFF', 'ON']), 
   }),
+
   TEAM_TACTIC_STAMINA_MULTIPLIER: Object.freeze({
     tempo: Object.freeze({ SLOW: 0.85, NORMAL: 1.0, FAST: 1.15 }),
     pressing: Object.freeze({ LOW: 0.8, MEDIUM: 1.0, HIGH: 1.2 }),

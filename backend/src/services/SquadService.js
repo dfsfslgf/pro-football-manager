@@ -14,6 +14,7 @@ const DEFAULT_TEAM_TACTICS = {
   tempo: 'NORMAL',
   defensiveLine: 'NORMAL',
   pressing: 'MEDIUM',
+  offsideTrap: 'OFF',
 };
 
 const POS_ORDER = { FW: 1, MF: 2, DF: 3, GK: 4 };
