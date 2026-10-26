@@ -20,7 +20,7 @@ export default class WalletService {
   }
 
   /**
-   * 골드/무상 캐시를 지급하고 EARN 로그를 남깁니다.
+   * 골드/무상 캐시를 지급하고 EARN 로그를 남김.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {{userId:number, cashPaid:number, cashFree:number, gold:number}} wallet
    * @param {{gold?:number, cashFree?:number}} reward
@@ -39,7 +39,7 @@ export default class WalletService {
   }
 
   /**
-   * 현재 잔액 스냅샷과 함께 transactions 행을 기록합니다.
+   * 현재 잔액 스냅샷과 함께 transactions 행을 기록함.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {{userId:number, cashPaid:number, cashFree:number}} wallet
    * @param {'EARN'|'SPEND'|'REFUND'} type
