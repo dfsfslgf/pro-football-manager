@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import useLiveMatchStore, { calcPlayerOvr, calcTeamAvgOvr } from '../../../store/useLiveMatchStore.js';
+import useLiveMatchStore, { calcPlayerOvr, calcTeamAvgOvr, getSafeName } from '../../../store/useLiveMatchStore.js';
 import { FAMILIARITY_META } from '../../../constants/tacticsConfig.js';
 
 const WIDTH = 900;
@@ -43,21 +43,6 @@ function distToSegment(p, a, b) {
   return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
 }
 
-function sanitizeName(rawVal) {
-  if (!rawVal) return null;
-  const str = String(rawVal).trim();
-  if (
-    str === '' ||
-    str.toLowerCase() === 'undefined' ||
-    str.toLowerCase() === 'null' ||
-    str.toLowerCase().includes('undefined') ||
-    str.toLowerCase().includes('nan')
-  ) {
-    return null;
-  }
-  return str;
-}
-
 function getAgentByUid(engine, uid) {
   if (!uid) return null;
   for (const a of engine.agents.values()) {
@@ -69,7 +54,7 @@ function getAgentByUid(engine, uid) {
 }
 
 /**
- * 실시간 평점(liveRating: 3.0 ~ 10.0) 및 실제 움직임 기반 추가 체력 소모(staminaDrain) 동기화
+ * 캔버스 에이전트의 실시간 평점 및 체력을 갱신하고 스토어 액션으로 동기화함
  */
 function adjustPlayerLiveStat(
   engine,
@@ -78,29 +63,30 @@ function adjustPlayerLiveStat(
 ) {
   if (!agent) return;
 
+  let changed = false;
   if (ratingDelta !== 0) {
-    const nextRating = clamp(Number(((agent.liveRating ?? 6.0) + ratingDelta).toFixed(2)), 3.0, 10.0);
-    agent.liveRating = nextRating;
+    agent.liveRating = clamp(Number(((agent.liveRating ?? 6.0) + ratingDelta).toFixed(2)), 3.0, 10.0);
+    changed = true;
+  }
+
+  if (staminaDrain > 0) {
+    agent.stamina = clamp(Number(((agent.stamina ?? 100) - staminaDrain).toFixed(2)), 5, 100);
+    agent.currentStamina = agent.stamina;
+    changed = true;
   }
 
   if (flashText && now > 0) {
     agent.flash = { type: 'CUSTOM', text: flashText, color: flashColor, until: now + 950 };
   }
 
-  const state = useLiveMatchStore.getState();
-  const teamKey = agent.team === 'HOME' ? 'homeTeam' : 'awayTeam';
-  const teamObj = state[teamKey];
-  if (teamObj && Array.isArray(teamObj.starters) && teamObj.starters[agent.slotIndex]) {
-    const targetPlayer = teamObj.starters[agent.slotIndex];
-    targetPlayer.liveRating = agent.liveRating;
-    targetPlayer.rating = agent.liveRating;
-
-    if (staminaDrain > 0) {
-      const currentVal = targetPlayer.currentStamina ?? targetPlayer.stamina ?? 100;
-      const nextStamina = clamp(currentVal - staminaDrain, 5, 100);
-      targetPlayer.currentStamina = nextStamina;
-      agent.stamina = nextStamina;
-      agent.currentStamina = nextStamina;
+  // 스토어 동기화 (평점 변경 시 즉시, 체력 미세 감소는 프레임 부하 방지를 위해 주기적 동기화)
+  if (changed && (ratingDelta !== 0 || Math.random() < 0.15)) {
+    const store = useLiveMatchStore.getState();
+    if (typeof store.syncCanvasPlayerState === 'function') {
+      store.syncCanvasPlayerState(agent.team, agent.slotIndex, {
+        liveRating: agent.liveRating,
+        currentStamina: agent.stamina,
+      });
     }
   }
 }
@@ -118,13 +104,29 @@ function isMaestroPlaymaker(player) {
   return false;
 }
 
+function isOffsideTrapEnabled(state, defendingSide) {
+  const teamObj = defendingSide === 'HOME' ? state?.homeTeam : state?.awayTeam;
+  return teamObj?.tactics?.offsideTrap === 'ON';
+}
+
+function getLastDefenderLineX(activePlayers, defendingSide) {
+  const fieldDefenders = activePlayers.filter(
+    (p) => p.team === defendingSide && !p.isSentOff && p.role !== 'GK' && p.roleCode !== 'GK'
+  );
+  if (fieldDefenders.length === 0) return defendingSide === 'HOME' ? 15 : 85;
+  if (defendingSide === 'HOME') {
+    return Math.min(...fieldDefenders.map((d) => d.x));
+  }
+  return Math.max(...fieldDefenders.map((d) => d.x));
+}
+
 function createEngine() {
   return {
     agents: new Map(),
     ball: {
       x: 50,
       y: 50,
-      z: 0, // 공의 높이 (공중볼 크로스/롱패스 표현용)
+      z: 0,
       startX: 50,
       startY: 50,
       targetX: 50,
@@ -133,7 +135,8 @@ function createEngine() {
       targetUid: null,
       isShot: false,
       isKillerPass: false,
-      isAerial: false, // 공중볼 여부 (문전 크로스 / 롱패스)
+      isAerial: false,
+      isCornerCross: false,
       aerialContestResolved: false,
       isGkClearance: false,
       mode: 'LOCKED',
@@ -152,6 +155,7 @@ function createEngine() {
       lastPasserUid: null,
       lastPasserName: null,
       lastPasserSlotIndex: null,
+      lastPasserRole: null,
       boxPassCount: 0,
       teamPassChain: 0,
       holdFrames: 0,
@@ -165,6 +169,7 @@ function createEngine() {
       keeperSaveText: '🧤 SAVE!',
       isGoalOutcome: false,
       mustPassAfterSteal: false,
+      setPieceState: null, // 'CORNER' | 'FREE_KICK' | 'PENALTY' | null
     },
     lastSeq: -1,
     bannerUntil: 0,
@@ -173,6 +178,8 @@ function createEngine() {
     initialized: false,
     postGoalWaitUntil: 0,
     lastDuelAt: 0,
+    lastOffsideAt: 0,
+    offsideVisual: null,
     lastScorerUid: null,
     touchCounts: new Map(),
     slidingEffects: [],
@@ -273,7 +280,7 @@ function syncAgents(engine, state, now) {
       let agent = engine.agents.get(expectedUid);
       const bx = Number.isFinite(p.baseX) ? p.baseX : side === 'HOME' ? 30 : 70;
       const by = Number.isFinite(p.baseY) ? p.baseY : 50;
-      const cleanName = sanitizeName(p.name || p.safeName || p.playerName) || `${side === 'HOME' ? 'H' : 'A'}#${idx + 1}`;
+      const cleanName = getSafeName(p, `${p.slotRoleCode || 'FW'} 선수`);
       const statsObj = p.effectiveStats || p.baseStats || {
         speed: 78,
         shooting: 75,
@@ -289,7 +296,6 @@ function syncAgents(engine, state, now) {
 
       if (!agent) {
         const initRating = Number.isFinite(p.liveRating) ? p.liveRating : 6.0;
-        p.liveRating = initRating;
         agent = {
           id: p.id ?? expectedUid,
           playerId: p.playerId ?? p.id ?? idx + 1,
@@ -330,10 +336,11 @@ function syncAgents(engine, state, now) {
           burstUntil: 0,
           slideUntil: 0,
           slideAngle: 0,
-          jumpUntil: 0, // 헤딩 점프 모션 타이머
+          jumpUntil: 0,
           isOverlapping: false,
           isPressing: false,
           isMakingRun: false,
+          isSteppingUpTrap: false,
           markingTargetUid: null,
           flash: engine.initialized ? { type: 'SUB', until: now + 1800 } : null,
         };
@@ -364,18 +371,15 @@ function syncAgents(engine, state, now) {
         agent.yellowCards = p.yellowCards || 0;
         agent.isSentOff = Boolean(p.isSentOff);
 
-        // 스토어의 분당 체력 소모를 그대로 수용
         const storeStamina = p.currentStamina ?? p.stamina ?? 100;
         agent.stamina = storeStamina;
         agent.currentStamina = storeStamina;
 
         if (isReplacedPlayer) {
           agent.liveRating = 6.0;
-          p.liveRating = 6.0;
           agent.flash = { type: 'SUB', until: now + 2000 };
-        } else {
-          p.liveRating = agent.liveRating;
-          p.rating = agent.liveRating;
+        } else if (Number.isFinite(p.liveRating)) {
+          agent.liveRating = p.liveRating;
         }
 
         if (!Number.isFinite(agent.x) || !Number.isFinite(agent.y)) {
@@ -413,6 +417,7 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
     p.isOverlapping = false;
     p.isPressing = false;
     p.isMakingRun = false;
+    p.isSteppingUpTrap = false;
     p.markingTargetUid = null;
   }
 
@@ -426,8 +431,10 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   ball.isShot = false;
   ball.isKillerPass = false;
   ball.isAerial = false;
+  ball.isCornerCross = false;
   ball.aerialContestResolved = false;
   ball.isGkClearance = false;
+  ball.setPieceState = null;
   ball.isGoalOutcome = false;
   ball.shotOutcome = null;
   ball.shotTrail = [];
@@ -438,6 +445,7 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   ball.boxPassCount = 0;
   ball.teamPassChain = 0;
   ball.lastPasserUid = null;
+  ball.lastPasserRole = null;
   ball.mustPassAfterSteal = false;
 
   const kickoffCandidates = activePlayers.filter(
@@ -463,6 +471,106 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   }
 
   engine.postGoalWaitUntil = now + POST_GOAL_COOLDOWN_MS / clamp(speed, 1, 2.5);
+}
+
+/**
+ * 코너킥 발생 시 키커를 코너 플래그로 배치하고 박스 안으로 공격수들을 집결시켜 실제 크로스 모션을 준비함
+ */
+function setupCornerKickPlay(engine, attackingTeam, now) {
+  const { ball, agents } = engine;
+  const isHome = attackingTeam === 'HOME';
+  const mates = [...agents.values()].filter((p) => p.team === attackingTeam && !p.isSentOff && p.role !== 'GK');
+  if (mates.length === 0) return;
+
+  const kicker = [...mates].sort((a, b) => (b.baseStats?.passing || 75) - (a.baseStats?.passing || 75))[0];
+  const cornerX = isHome ? 97.5 : 2.5;
+  const cornerY = ball.y < 50 ? 4 : 96;
+
+  kicker.x = cornerX;
+  kicker.y = cornerY;
+  kicker.targetX = cornerX;
+  kicker.targetY = cornerY;
+  kicker.stunUntil = 0;
+
+  // 스트라이커와 장신 센터백을 페널티 박스 중앙으로 집결
+  let boxOffset = 0;
+  for (const m of mates) {
+    if (m.uid === kicker.uid) continue;
+    if (STRIKER_ROLES.includes(m.slotRoleCode) || CENTERBACK_ROLES.includes(m.slotRoleCode) || m.slotRoleCode === 'CAM') {
+      m.targetX = isHome ? 85 + (boxOffset % 3) * 2.5 : 15 - (boxOffset % 3) * 2.5;
+      m.targetY = 38 + (boxOffset % 4) * 8;
+      boxOffset++;
+    }
+  }
+
+  ball.mode = 'LOCKED';
+  ball.ownerUid = kicker.uid;
+  ball.x = cornerX;
+  ball.y = cornerY;
+  ball.z = 0;
+  ball.holdFrames = 0;
+  ball.setPieceState = 'CORNER';
+  engine.attackTeam = attackingTeam;
+
+  adjustPlayerLiveStat(engine, kicker, {
+    flashText: '🚩 코너킥 크로스 준비',
+    flashColor: '#fbbf24',
+    now,
+  });
+
+  const store = useLiveMatchStore.getState();
+  if (typeof store.recordCanvasCorner === 'function') {
+    store.recordCanvasCorner(attackingTeam, kicker.name);
+  }
+}
+
+/**
+ * 반칙 발생 지점에서 프리킥 또는 페널티킥으로 플레이를 재개함
+ */
+function setupFoulRestartPlay(engine, attackingTeam, foulX, foulY, isPenalty, now) {
+  const { ball, agents } = engine;
+  const isHome = attackingTeam === 'HOME';
+  const mates = [...agents.values()].filter((p) => p.team === attackingTeam && !p.isSentOff && p.role !== 'GK');
+  if (mates.length === 0) return;
+
+  const kicker = [...mates].sort(
+    (a, b) =>
+      (isPenalty ? b.baseStats?.shooting || 75 : b.baseStats?.passing || 75) -
+      (isPenalty ? a.baseStats?.shooting || 75 : a.baseStats?.passing || 75)
+  )[0];
+
+  const restartX = isPenalty ? (isHome ? 88.5 : 11.5) : clamp(foulX, 12, 88);
+  const restartY = isPenalty ? 50 : clamp(foulY, 10, 90);
+
+  kicker.x = restartX;
+  kicker.y = restartY;
+  kicker.targetX = restartX;
+  kicker.targetY = restartY;
+  kicker.stunUntil = 0;
+
+  // 수비수들을 프리킥 지점에서 최소 9m 뒤로 물림
+  for (const p of agents.values()) {
+    if (p.team !== attackingTeam && p.role !== 'GK' && !p.isSentOff && distance(p, kicker) < 10) {
+      p.x = clamp(p.x + (isHome ? 10 : -10), 8, 92);
+      p.targetX = p.x;
+      p.stunUntil = now + 700;
+    }
+  }
+
+  ball.mode = 'LOCKED';
+  ball.ownerUid = kicker.uid;
+  ball.x = restartX;
+  ball.y = restartY;
+  ball.z = 0;
+  ball.holdFrames = 0;
+  ball.setPieceState = isPenalty ? 'PENALTY' : 'FREE_KICK';
+  engine.attackTeam = attackingTeam;
+
+  adjustPlayerLiveStat(engine, kicker, {
+    flashText: isPenalty ? '🎯 페널티킥 키커!' : '🎯 프리킥 재개!',
+    flashColor: '#fde047',
+    now,
+  });
 }
 
 function applyAction(engine, action, now) {
@@ -497,16 +605,11 @@ function pushAttackersAwayFromKeeper(engine, attackingSide) {
   }
 }
 
-/**
- * [능력치 차이 기반 슈팅 & 수비 블로킹 판정]
- * - 인위적인 슈팅 횟수 쿨다운 없이, 수비수의 수비력/피지컬이 높으면 슈팅 각도를 좁혀 육탄 방어(Block)하고,
- *   공격수의 결정력/스피드/드리블이 압도적이면 수비를 뚫고 슈팅을 마음껏 시도합니다.
- */
 function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   const isHome = shooter.team === 'HOME';
   shooter.targetX = shooter.baseX;
   shooter.targetY = shooter.baseY;
-  adjustPlayerLiveStat(engine, shooter, { staminaDrain: 0.35 });
+  adjustPlayerLiveStat(engine, shooter, { staminaDrain: 0.32 });
 
   const store = useLiveMatchStore.getState();
   const ball = engine.ball;
@@ -525,49 +628,56 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   const shooterPass = shooter.baseStats?.passing || 75;
   const shooterTech = shooter.baseStats?.dribbling || 74;
   const shooterSpeed = shooter.baseStats?.speed || 75;
+  const isPenaltyShot = shotStyle === 'PENALTY';
 
-  // 능력치 비교 기반 수비수 슈팅 블로킹 판정:
-  // 공격수 앞(거리 5.2 이내)에 있는 수비수의 수비력 + 피지컬 vs 공격수의 드리블 + 스피드를 비교
-  const frontBlockers = nearbyDefenders.filter(
-    (d) => distance(d, shooter) <= 5.2 && (isHome ? d.x >= shooter.x - 1.5 : d.x <= shooter.x + 1.5)
-  );
-  if (frontBlockers.length > 0) {
-    const bestBlocker = frontBlockers.sort(
-      (a, b) => (b.baseStats?.defense || 75) - (a.baseStats?.defense || 75)
-    )[0];
-    const defPower = (bestBlocker.baseStats?.defense || 75) * 0.65 + (bestBlocker.baseStats?.physical || 75) * 0.35;
-    const attRelease = shooterTech * 0.55 + shooterSpeed * 0.45;
-    // 수비 능력이 공격수보다 높을수록 블로킹 확률이 최대 62%까지 상승 (능력치 기반 슈팅 억제)
-    const blockProb = clamp(((defPower - attRelease + 25) / 80) * 0.65, 0.15, 0.62);
+  // 페널티킥이 아닐 때만 수비수 육탄 블로킹 체크
+  if (!isPenaltyShot) {
+    const frontBlockers = nearbyDefenders.filter(
+      (d) => distance(d, shooter) <= 5.0 && (isHome ? d.x >= shooter.x - 1.5 : d.x <= shooter.x + 1.5)
+    );
+    if (frontBlockers.length > 0) {
+      const bestBlocker = frontBlockers.sort(
+        (a, b) => (b.baseStats?.defense || 75) - (a.baseStats?.defense || 75)
+      )[0];
+      const defPower = (bestBlocker.baseStats?.defense || 75) * 0.65 + (bestBlocker.baseStats?.physical || 75) * 0.35;
+      const attRelease = shooterTech * 0.55 + shooterSpeed * 0.45;
+      const blockProb = clamp(((defPower - attRelease + 25) / 80) * 0.62, 0.14, 0.58);
 
-    if (Math.random() < blockProb) {
-      bestBlocker.jumpUntil = now + 450;
-      adjustPlayerLiveStat(engine, bestBlocker, {
-        ratingDelta: +0.35,
-        staminaDrain: 0.25,
-        flashText: '🧱 육탄블록! (+0.3)',
-        flashColor: '#38bdf8',
-        now,
-      });
-      adjustPlayerLiveStat(engine, shooter, {
-        ratingDelta: -0.25,
-        flashText: '❌ 슈팅막힘 (-0.2)',
-        flashColor: '#f87171',
-        now,
-      });
+      if (Math.random() < blockProb) {
+        bestBlocker.jumpUntil = now + 450;
+        adjustPlayerLiveStat(engine, bestBlocker, {
+          ratingDelta: +0.35,
+          staminaDrain: 0.22,
+          flashText: '🧱 육탄블록! (+0.3)',
+          flashColor: '#38bdf8',
+          now,
+        });
+        adjustPlayerLiveStat(engine, shooter, {
+          ratingDelta: -0.25,
+          flashText: '❌ 슈팅막힘 (-0.2)',
+          flashColor: '#f87171',
+          now,
+        });
 
-      ball.mode = 'LOCKED';
-      ball.z = 0;
-      ball.isAerial = false;
-      ball.ownerUid = bestBlocker.uid;
-      ball.holdFrames = 0;
-      ball.teamPassChain = 0;
-      ball.mustPassAfterSteal = true;
-      engine.attackTeam = bestBlocker.team;
-      if (typeof store.recordCanvasTackle === 'function') {
-        store.recordCanvasTackle(bestBlocker.team, bestBlocker.slotIndex);
+        // 수비 맞고 골라인 아웃 시 30% 확률로 코너킥 전환
+        if (Math.random() < 0.3) {
+          setupCornerKickPlay(engine, shooter.team, now);
+          return;
+        }
+
+        ball.mode = 'LOCKED';
+        ball.z = 0;
+        ball.isAerial = false;
+        ball.ownerUid = bestBlocker.uid;
+        ball.holdFrames = 0;
+        ball.teamPassChain = 0;
+        ball.mustPassAfterSteal = true;
+        engine.attackTeam = bestBlocker.team;
+        if (typeof store.recordCanvasTackle === 'function') {
+          store.recordCanvasTackle(bestBlocker.team, bestBlocker.slotIndex);
+        }
+        return;
       }
-      return;
     }
   }
 
@@ -579,14 +689,15 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   const staminaFactor = shooter.stamina < 35 ? 0.72 : shooter.stamina < 60 ? 0.88 : 1.0;
   const injuryFactor = shooter.isInjured ? 0.78 : 1.0;
   const moraleFactor = 0.88 + ((shooter.morale ?? 75) / 100) * 0.24;
+  const talkAtkMod = attTeamObj?.talkEffect?.atkMul || 1.0;
   const weatherLongMod = shotStyle === 'LONG_SHOT' ? (state.weather?.longShotMod || 1.05) : 1.0;
-  const killerPassBonus = ball.isKillerPass ? 1.15 : 1.0;
+  const killerPassBonus = ball.isKillerPass || shotStyle === 'HEADER' ? 1.18 : 1.0;
 
   const effectiveAttack =
-    baseAttackStat * staminaFactor * injuryFactor * moraleFactor * weatherLongMod * killerPassBonus;
+    baseAttackStat * staminaFactor * injuryFactor * moraleFactor * talkAtkMod * weatherLongMod * killerPassBonus;
 
   const keeperReflex = keeper ? (keeper.baseStats?.gkReflexes || 75) : 72;
-  const defPressure = nearbyDefenders.reduce((acc, d) => acc + (d.baseStats?.defense || 75) * 0.16, 0);
+  const defPressure = isPenaltyShot ? 0 : nearbyDefenders.reduce((acc, d) => acc + (d.baseStats?.defense || 75) * 0.15, 0);
   const effectiveDefense = keeperReflex + defPressure;
 
   const attTeamOvr = attTeamObj?.avgOvr || calcTeamAvgOvr(attTeamObj);
@@ -598,7 +709,9 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   const postGoalDampener = now < engine.postGoalWaitUntil ? 0.25 : 1.0;
 
   const rawRatio = effectiveAttack / Math.max(1, effectiveAttack + effectiveDefense);
-  const goalProb = clamp(rawRatio * 0.44 * ovrGapMultiplier * monopolyDampener * postGoalDampener, 0.06, 0.38);
+  const goalProb = isPenaltyShot
+    ? 0.78
+    : clamp(rawRatio * 0.44 * ovrGapMultiplier * monopolyDampener * postGoalDampener, 0.06, 0.38);
 
   const roll = Math.random();
   let outcome = 'MISS';
@@ -610,8 +723,12 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
     outcome = 'MISS';
   }
 
+  // 직전 패서가 골키퍼(상대 키퍼 실책 또는 아군 키퍼)일 경우 어시스트에서 제외하고 단독 돌파로 처리
+  const isPasserGk = ball.lastPasserRole === 'GK';
   const validAssisterName =
-    ball.lastPasserName && ball.lastPasserName !== shooter.name ? ball.lastPasserName : null;
+    !isPenaltyShot && !isPasserGk && ball.lastPasserName && ball.lastPasserName !== shooter.name
+      ? ball.lastPasserName
+      : null;
   const validAssisterSlot =
     validAssisterName && ball.lastPasserSlotIndex !== shooter.slotIndex ? ball.lastPasserSlotIndex : null;
   const validAssisterId =
@@ -621,6 +738,8 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   ball.isShot = true;
   ball.z = 0;
   ball.isAerial = false;
+  ball.isCornerCross = false;
+  ball.setPieceState = null;
   ball.isKillerPass = false;
   ball.isGkClearance = false;
   ball.mustPassAfterSteal = false;
@@ -628,11 +747,12 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   ball.targetUid = null;
   ball.shotTeam = shooter.team;
   ball.goalStyle = shotStyle;
+  ball.isGkMistake = isPasserGk;
   ball.shooterId = shooter.userPlayerId ?? shooter.playerId ?? shooter.id;
-  ball.shooterName = sanitizeName(shooter.name) || '스트라이커';
+  ball.shooterName = getSafeName(shooter, '스트라이커');
   ball.shooterSlotIndex = shooter.slotIndex ?? 0;
   ball.assisterId = validAssisterId;
-  ball.assisterName = sanitizeName(validAssisterName);
+  ball.assisterName = validAssisterName;
   ball.assisterSlotIndex = validAssisterSlot;
   ball.isGoalOutcome = outcome === 'GOAL';
   ball.shotOutcome = outcome;
@@ -651,15 +771,22 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
     if (keeper) keeper.targetY = cornerY > 50 ? 46 : 54;
 
     adjustPlayerLiveStat(engine, shooter, { ratingDelta: +1.2, flashText: '⚽ GOAL! (+1.2)', flashColor: '#fde047', now });
-    if (ball.lastPasserUid) {
+    if (ball.lastPasserUid && validAssisterName) {
       const assisterAgent = getAgentByUid(engine, ball.lastPasserUid);
       if (assisterAgent && assisterAgent.team === shooter.team && assisterAgent.uid !== shooter.uid) {
         adjustPlayerLiveStat(engine, assisterAgent, { ratingDelta: +0.8, flashText: '🎯 ASSIST! (+0.8)', flashColor: '#34d399', now });
       }
     }
+    // 실점한 상대 수비진 및 실책한 골키퍼 평점 하락
     for (const d of engine.agents.values()) {
       if (d.team === defendSide && !d.isSentOff && (d.role === 'DF' || d.role === 'GK')) {
-        adjustPlayerLiveStat(engine, d, { ratingDelta: -0.35 });
+        const penalty = d.role === 'GK' && isPasserGk ? -0.75 : -0.35;
+        adjustPlayerLiveStat(engine, d, {
+          ratingDelta: penalty,
+          flashText: d.role === 'GK' && isPasserGk ? '📉 키퍼 치명적 실책 (-0.7)' : null,
+          flashColor: '#ef4444',
+          now,
+        });
       }
     }
   } else if (outcome === 'SAVED') {
@@ -677,7 +804,7 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
         shooter.team,
         true,
         shooter.slotIndex,
-        `🧤 [슈퍼 세이브!] ${attTeamObj?.name} ${ball.shooterName}(${shooter.slotRoleCode}) 선수의 결정적 슈팅을 골키퍼 ${keeper?.name || 'GK'} 선수가 막아냅니다!`
+        `🧤 [슈퍼 세이브] ${attTeamObj?.name} ${ball.shooterName}(${shooter.slotRoleCode}) 선수의 슈팅을 골키퍼 ${keeper?.name || 'GK'} 선수가 막아냅니다.`
       );
     }
   } else {
@@ -701,10 +828,109 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   }
 }
 
-/**
- * 패스 실행 (거리 22 이상이거나 문전으로 올리는 크로스일 경우 공중볼 `isAerial = true`로 판정!)
- */
-function executePassToPlayer(engine, carrier, target, state, now, isKillerThroughBall = false, isGkKick = false) {
+function checkAndHandleOffsideOnPass(engine, carrier, target, state, now) {
+  if (!carrier || !target || carrier.role === 'GK' || target.role === 'GK') return false;
+  if (now - (engine.lastOffsideAt || 0) < 3500) return false;
+
+  const isHomeAtt = carrier.team === 'HOME';
+  const defendSide = isHomeAtt ? 'AWAY' : 'HOME';
+  const activePlayers = [...engine.agents.values()].filter((p) => !p.isSentOff);
+
+  const inEnemyHalf = isHomeAtt ? target.x > 52 : target.x < 48;
+  const aheadOfBall = isHomeAtt ? target.x > carrier.x + 2.5 : target.x < carrier.x - 2.5;
+  if (!inEnemyHalf || !aheadOfBall) return false;
+
+  const trapActive = isOffsideTrapEnabled(state, defendSide);
+  const fieldDefenders = activePlayers.filter(
+    (p) => p.team === defendSide && p.role !== 'GK' && p.roleCode !== 'GK'
+  );
+  if (fieldDefenders.length === 0) return false;
+
+  const lastDefX = getLastDefenderLineX(activePlayers, defendSide);
+  const avgDefStat =
+    fieldDefenders.reduce((sum, d) => sum + (d.baseStats?.defense || 75), 0) / fieldDefenders.length;
+  const trapStepBonus = trapActive ? clamp((avgDefStat - 60) * 0.14, 1.5, 4.8) : 0;
+
+  const effectiveOffsideLineX = isHomeAtt ? lastDefX - trapStepBonus : lastDefX + trapStepBonus;
+  const isBeyondLine = isHomeAtt
+    ? target.x > effectiveOffsideLineX + 0.6
+    : target.x < effectiveOffsideLineX - 0.6;
+
+  if (!isBeyondLine) return false;
+
+  const attSpeed = target.baseStats?.speed || 76;
+  const lineBreakChance = trapActive
+    ? clamp((attSpeed - avgDefStat) * 0.015 + 0.18, 0.08, 0.42)
+    : clamp((attSpeed - avgDefStat) * 0.02 + 0.45, 0.25, 0.68);
+
+  if (Math.random() < lineBreakChance) {
+    target.x = isHomeAtt ? effectiveOffsideLineX - 0.5 : effectiveOffsideLineX + 0.5;
+    target.burstUntil = now + 950;
+    adjustPlayerLiveStat(engine, target, {
+      ratingDelta: +0.25,
+      flashText: '⚡ 라인 브레이킹! (+0.2)',
+      flashColor: '#a3e635',
+      now,
+    });
+    return false;
+  }
+
+  engine.lastOffsideAt = now;
+  engine.offsideVisual = {
+    lineX: effectiveOffsideLineX,
+    attackerX: target.x,
+    attackerY: target.y,
+    attackerName: target.name,
+    defendingSide,
+    trapActive,
+    until: now + 1500,
+  };
+
+  adjustPlayerLiveStat(engine, target, {
+    ratingDelta: -0.25,
+    flashText: '🚩 OFFSIDE! (-0.2)',
+    flashColor: '#ef4444',
+    now,
+  });
+
+  const backLineDefenders = fieldDefenders.filter((d) => d.role === 'DF');
+  for (const d of backLineDefenders) {
+    adjustPlayerLiveStat(engine, d, {
+      ratingDelta: trapActive ? +0.25 : +0.15,
+      staminaDrain: trapActive ? 0.22 : 0.08,
+      flashText: trapActive ? '🪤 오프사이드 트랩 성공! (+0.2)' : '🚩 오프사이드 유도!',
+      flashColor: '#38bdf8',
+      now,
+    });
+  }
+
+  const fkTaker =
+    backLineDefenders.sort((a, b) => distance(a, target) - distance(b, target))[0] || fieldDefenders[0];
+  const ball = engine.ball;
+  ball.mode = 'LOCKED';
+  ball.z = 0;
+  ball.isAerial = false;
+  ball.isKillerPass = false;
+  ball.ownerUid = fkTaker.uid;
+  ball.targetUid = null;
+  ball.x = fkTaker.x;
+  ball.y = fkTaker.y;
+  ball.holdFrames = 0;
+  ball.teamPassChain = 0;
+  ball.mustPassAfterSteal = true;
+  engine.attackTeam = defendSide;
+
+  target.targetX = isHomeAtt ? Math.min(target.baseX, effectiveOffsideLineX - 6) : Math.max(target.baseX, effectiveOffsideLineX + 6);
+  target.stunUntil = now + 800;
+
+  return true;
+}
+
+function executePassToPlayer(engine, carrier, target, state, now, isKillerThroughBall = false, isGkKick = false, isCornerOrCross = false) {
+  if (!isGkKick && !isCornerOrCross && checkAndHandleOffsideOnPass(engine, carrier, target, state, now)) {
+    return;
+  }
+
   const ball = engine.ball;
   const isHome = carrier.team === 'HOME';
   const dir = isHome ? 1 : -1;
@@ -722,11 +948,11 @@ function executePassToPlayer(engine, carrier, target, state, now, isKillerThroug
   }
 
   adjustPlayerLiveStat(engine, carrier, {
-    ratingDelta: isKillerThroughBall ? +0.12 : +0.02,
+    ratingDelta: isKillerThroughBall || isCornerOrCross ? +0.14 : +0.02,
     staminaDrain: 0.14,
   });
 
-  if (isKillerThroughBall && now) {
+  if (isKillerThroughBall && now && !isCornerOrCross) {
     const leadX = clamp(target.x + dir * 5.5, 22, 78);
     const leadY = clamp(target.y + (50 - target.y) * 0.2, 14, 86);
     target.targetX = leadX;
@@ -736,16 +962,15 @@ function executePassToPlayer(engine, carrier, target, state, now, isKillerThroug
 
   const passDist = distance(carrier, target);
   const intoBox = isHome ? target.x >= 70 : target.x <= 30;
-  const fromFlank = carrier.y < 24 || carrier.y > 76;
-
-  // [공중볼(Aerial Ball) 판정]
-  // 문전으로 날아오는 크로스/롱볼이거나 거리 22 이상의 롱패스, 골킥은 공중볼로 판정
-  const isAerialBall = isGkKick || passDist >= 22 || (intoBox && (fromFlank || passDist >= 15));
+  const fromFlank = carrier.y < 26 || carrier.y > 74;
+  const isAerialBall = isCornerOrCross || isGkKick || passDist >= 22 || (intoBox && (fromFlank || passDist >= 14));
 
   ball.mode = 'PASS';
   ball.isShot = false;
   ball.isKillerPass = isKillerThroughBall;
   ball.isAerial = isAerialBall;
+  ball.isCornerCross = isCornerOrCross;
+  ball.setPieceState = null;
   ball.aerialContestResolved = false;
   ball.z = 0;
   ball.startX = carrier.x;
@@ -758,8 +983,9 @@ function executePassToPlayer(engine, carrier, target, state, now, isKillerThroug
   ball.targetY = target.targetY || target.y;
   ball.lastPasserUid = carrier.uid;
   ball.lastPasserId = carrier.userPlayerId ?? carrier.playerId ?? carrier.id;
-  ball.lastPasserName = sanitizeName(carrier.name);
+  ball.lastPasserName = getSafeName(carrier);
   ball.lastPasserSlotIndex = carrier.slotIndex;
+  ball.lastPasserRole = carrier.role;
   ball.holdFrames = 0;
   ball.passFrames = 0;
   ball.passTrail = isKillerThroughBall || isAerialBall ? [{ x: carrier.x, y: carrier.y }] : [];
@@ -790,18 +1016,17 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
     if (ball.lastPasserUid && mate.uid === ball.lastPasserUid && mates.length > 2) continue;
 
     const mateIsAttacker = ATTACKER_ROLES.includes(mate.slotRoleCode);
-    const ownerOnExtremeWing = owner.y < 18 || owner.y > 82;
-    if (inAttackingHalf && carrierIsAttacker && mateIsAttacker && !ownerOnExtremeWing) {
+    const ownerOnFlank = owner.y < 24 || owner.y > 76;
+    if (inAttackingHalf && carrierIsAttacker && mateIsAttacker && !ownerOnFlank) {
       continue;
     }
 
     const dist = distance(mate, owner);
-    // 패스 능력치가 높은 선수일수록 더 먼 거리의 롱패스/전환 패스를 정확히 찔러줄 수 있음
     const maxRange = 36 + Math.max(0, ownerPassStat - 70) * 0.7;
     if (dist < 6 || dist > maxRange) continue;
 
     const forwardProgress = (mate.x - owner.x) * dir;
-    if (forwardProgress < 3) continue;
+    if (forwardProgress < 3 && !ownerOnFlank) continue;
 
     let score = forwardProgress * 2.5;
 
@@ -834,6 +1059,9 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
   return best;
 }
 
+/**
+ * 볼 보유자 의사결정 (코너킥 크로스, 프리킥/페널티킥 슈팅, 측면/하프스페이스 크로스 vs 직접 돌파 판단)
+ */
 function handleCarrierDecision(engine, carrier, state, now) {
   const ball = engine.ball;
   const all = [...engine.agents.values()];
@@ -844,7 +1072,59 @@ function handleCarrierDecision(engine, carrier, state, now) {
 
   ball.holdFrames = (ball.holdFrames || 0) + 1;
 
-  // 골키퍼 빌드업 또는 롱킥
+  // 1. 세트피스(페널티킥 / 코너킥 / 프리킥) 처리
+  if (ball.setPieceState === 'PENALTY') {
+    if (ball.holdFrames >= 10) {
+      triggerShot(engine, carrier, state, now, 'PENALTY');
+    }
+    return;
+  }
+
+  if (ball.setPieceState === 'CORNER') {
+    if (ball.holdFrames >= 10) {
+      const boxTargets = all.filter(
+        (p) =>
+          p.team === carrier.team &&
+          !p.isSentOff &&
+          p.uid !== carrier.uid &&
+          (isHome ? p.x >= 72 : p.x <= 28)
+      );
+      const target =
+        boxTargets.length > 0
+          ? boxTargets[Math.floor(Math.random() * boxTargets.length)]
+          : selectBestPassTarget(engine, carrier, 'DIRECT_LONG', ball, true);
+
+      if (target) {
+        adjustPlayerLiveStat(engine, carrier, {
+          flashText: '🚩 코너킥 크로스!',
+          flashColor: '#fbbf24',
+          now,
+        });
+        executePassToPlayer(engine, carrier, target, state, now, true, false, true);
+      } else {
+        ball.setPieceState = null;
+      }
+    }
+    return;
+  }
+
+  if (ball.setPieceState === 'FREE_KICK') {
+    if (ball.holdFrames >= 10) {
+      if (distToGoal <= 32 && Math.random() < 0.65) {
+        triggerShot(engine, carrier, state, now, 'FREE_KICK');
+      } else {
+        const target = selectBestPassTarget(engine, carrier, 'DIRECT_LONG', ball, true);
+        if (target) {
+          executePassToPlayer(engine, carrier, target, state, now, true, false, true);
+        } else {
+          ball.setPieceState = null;
+        }
+      }
+    }
+    return;
+  }
+
+  // 2. 골키퍼 빌드업
   if (carrier.role === 'GK' || carrier.roleCode === 'GK') {
     const enemySide = isHome ? 'AWAY' : 'HOME';
     pushAttackersAwayFromKeeper(engine, enemySide);
@@ -862,25 +1142,57 @@ function handleCarrierDecision(engine, carrier, state, now) {
 
       if (targets.length > 0) {
         const target = targets[Math.floor(Math.random() * Math.min(4, targets.length))];
-        executePassToPlayer(engine, carrier, target, state, now, false, true);
+        executePassToPlayer(engine, carrier, target, state, now, false, true, false);
       }
     }
     return;
   }
 
-  // 문전 슈팅 구역 (홈 X >= 72, 원정 X <= 28, 또는 골대 거리 25 이내) 진입 시:
-  // 측면 끝(크로스 구역)이면 문전으로 공중볼 크로스를 올리고, 중앙이면 패스 미루지 않고 즉시 슈팅
+  // 3. 코너킥 크로스 직후 볼을 받은 공격수의 즉각적인 헤더/논스톱 슈팅 마무리
+  if (ball.lastPasserUid && (isHome ? carrier.x >= 72 : carrier.x <= 28) && ball.holdFrames >= 2 && !engine.bannerActive) {
+    const isHeaderFinish = Math.random() < 0.6;
+    if (isHeaderFinish) carrier.jumpUntil = now + 500;
+    triggerShot(engine, carrier, state, now, isHeaderFinish ? 'HEADER' : 'NORMAL');
+    return;
+  }
+
+  // 4. 측면 및 하프스페이스(홈 X: 62~92, 원정 X: 8~38, Y < 26 또는 Y > 74)에서 선수의 크로스 vs 컷인 돌파 판단
+  const inFlankOrHalfSpace =
+    (isHome ? carrier.x >= 62 : carrier.x <= 38) && (carrier.y < 26 || carrier.y > 74);
+
+  if (inFlankOrHalfSpace && ball.holdFrames >= 5) {
+    const boxMates = all.filter(
+      (p) =>
+        p.team === carrier.team &&
+        !p.isSentOff &&
+        p.uid !== carrier.uid &&
+        (isHome ? p.x >= 68 : p.x <= 32) &&
+        p.y >= 26 &&
+        p.y <= 74
+    );
+
+    const passStat = carrier.baseStats?.passing || 75;
+    const shootStat = carrier.baseStats?.shooting || 74;
+    // 패스 능력치가 높거나 STAY_WIDE/OVERLAP 지침이면 크로스를 선호하고, CUT_INSIDE이거나 슈팅이 높으면 직접 돌파 선호
+    const crossDesire =
+      (carrier.instruction === 'STAY_WIDE' || carrier.instruction === 'OVERLAP' ? 0.78 : 0.55) +
+      (passStat - shootStat) * 0.01;
+
+    if (boxMates.length > 0 && Math.random() < clamp(crossDesire, 0.25, 0.85)) {
+      const target = boxMates[Math.floor(Math.random() * boxMates.length)];
+      adjustPlayerLiveStat(engine, carrier, {
+        flashText: '🎯 얼리 크로스!',
+        flashColor: '#38bdf8',
+        now,
+      });
+      executePassToPlayer(engine, carrier, target, state, now, true, false, true);
+      return;
+    }
+  }
+
+  // 5. 문전 슈팅 구역 진입 시 즉시 마무리
   const inBox = (isHome ? carrier.x >= 72 : carrier.x <= 28) || distToGoal <= 25;
   if (inBox && !engine.bannerActive) {
-    const onExtremeWing = carrier.y < 17 || carrier.y > 83;
-    if (onExtremeWing && ball.holdFrames >= 4) {
-      const boxTarget = selectBestPassTarget(engine, carrier, 'DIRECT_LONG', ball, true);
-      if (boxTarget) {
-        executePassToPlayer(engine, carrier, boxTarget, state, now, true);
-        return;
-      }
-    }
-
     if (ball.holdFrames >= 4) {
       const isWinger = WINGER_ROLES.includes(carrier.slotRoleCode);
       const style = isWinger ? 'CUT_INSIDE' : ball.teamPassChain >= 3 ? 'TIKI_TAKA' : 'NORMAL';
@@ -893,7 +1205,6 @@ function handleCarrierDecision(engine, carrier, state, now) {
     return;
   }
 
-  // 공 탈취 직후 빠른 역습 패스
   if (ball.mustPassAfterSteal && ball.holdFrames >= 4) {
     const teamObj = isHome ? state.homeTeam : state.awayTeam;
     const target = selectBestPassTarget(engine, carrier, teamObj?.tactics?.passingStyle || 'DIRECT_LONG', ball, false);
@@ -904,24 +1215,22 @@ function handleCarrierDecision(engine, carrier, state, now) {
     ball.mustPassAfterSteal = false;
   }
 
-  // 포지션별 과감한 전진 드리블 돌파
   const isWinger = WINGER_ROLES.includes(carrier.slotRoleCode);
   const isAttacker = ATTACKER_ROLES.includes(carrier.slotRoleCode);
 
   if (isWinger) {
-    const cutInFactor = (isHome ? carrier.x >= 54 : carrier.x <= 46) ? 0.52 : 0.15;
+    const cutInFactor = (isHome ? carrier.x >= 54 : carrier.x <= 46) ? 0.48 : 0.15;
     carrier.targetX = isHome ? 78 : 22;
     carrier.targetY = carrier.y + (50 - carrier.y) * cutInFactor;
   } else if (isAttacker) {
     carrier.targetX = isHome ? 79 : 21;
     carrier.targetY = carrier.y + (50 - carrier.y) * 0.38;
-    return; 
+    return;
   } else {
     carrier.targetX = clamp(carrier.x + dir * 20, 18, 76);
     carrier.targetY = carrier.y + (50 - carrier.y) * 0.2;
   }
 
-  // 미드필더의 아크 정면 중거리 슛
   const isMidfielder = MIDFIELDER_ROLES.includes(carrier.slotRoleCode);
   const inMidShootZone = isHome ? carrier.x >= 60 && carrier.x < 72 : carrier.x <= 40 && carrier.x > 28;
   if (isMidfielder && inMidShootZone && ball.holdFrames >= 9 && !engine.bannerActive) {
@@ -933,7 +1242,6 @@ function handleCarrierDecision(engine, carrier, state, now) {
     }
   }
 
-  // 전방 침투 스루패스 / 크로스 연결
   const holdLimit = carrier.role === 'DF' ? 8 : 14;
   if (ball.holdFrames >= holdLimit) {
     const teamObj = isHome ? state.homeTeam : state.awayTeam;
@@ -952,6 +1260,9 @@ function handleCarrierDecision(engine, carrier, state, now) {
   }
 }
 
+/**
+ * 1:1 경합 판정 (반칙 확률 현실화, 반칙 위치 프리킥 재개, 페널티 박스 내 깊은 반칙 시 페널티킥 부여)
+ */
 function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   if (owner.role === 'GK' || owner.roleCode === 'GK' || chaser.role === 'GK' || chaser.roleCode === 'GK') {
     return;
@@ -964,8 +1275,8 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   const isOwnerHome = owner.team === 'HOME';
   const attackDir = isOwnerHome ? 1 : -1;
 
-  adjustPlayerLiveStat(engine, owner, { staminaDrain: 0.28 });
-  adjustPlayerLiveStat(engine, chaser, { staminaDrain: 0.30 });
+  adjustPlayerLiveStat(engine, owner, { staminaDrain: 0.25 });
+  adjustPlayerLiveStat(engine, chaser, { staminaDrain: 0.26 });
 
   const dribStat =
     (owner.baseStats?.dribbling || 75) * 0.55 +
@@ -981,7 +1292,6 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   const isAggressivePress = defTeamObj?.tactics?.pressing === 'GEGENPRESS' || defTeamObj?.tactics?.pressing === 'HIGH';
   const effectiveDefPressure = defStat + (isAggressivePress ? 6 : 0);
 
-  // 미드필더의 패스 능력치가 수비 압박보다 높으면 유연하게 탈압박 패스 성공
   if (MIDFIELDER_ROLES.includes(owner.slotRoleCode)) {
     const escapeTarget = selectBestPassTarget(engine, owner, 'DIRECT_LONG', ball, true);
     const passAdvantage = (passStat - effectiveDefPressure) * 0.02;
@@ -1001,14 +1311,13 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   }
 
   const relativeX = (chaser.x - owner.x) * attackDir;
-  const isFromBehind = relativeX < -1.8;
+  const isFromBehind = relativeX < -1.5;
   const alreadyBooked = (chaser.yellowCards || 0) >= 1;
 
-  // 수비수의 수비 능력치와 공격수의 드리블 능력치 차이를 직접 반영하여,
-  // 수비수가 강하면 75% 확률로 뺏어내고, 공격수가 월드클래스(예: OVR 90 vs 수비 70)이면 80% 확률로 돌파 성공
   const statDiff = effectiveDefPressure - dribStat;
-  const cleanStealProb = clamp(0.50 + statDiff * 0.018 - (isFromBehind ? 0.1 : 0), 0.18, 0.78);
-  const foulOnTackleProb = alreadyBooked ? 0.008 : isFromBehind ? 0.045 : 0.018;
+  const cleanStealProb = clamp(0.48 + statDiff * 0.016 - (isFromBehind ? 0.1 : 0), 0.18, 0.72);
+  // 실제 축구처럼 경기당 적정 횟수의 프리킥/경고/페널티킥이 나오도록 파울 확률 조정
+  const foulOnTackleProb = alreadyBooked ? 0.035 : isFromBehind ? 0.14 : 0.075;
 
   const slideAngle = Math.atan2(owner.y - chaser.y, owner.x - chaser.x);
   chaser.slideUntil = now + 420;
@@ -1025,19 +1334,24 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   const roll = Math.random();
 
   if (roll < foulOnTackleProb) {
-    const maliceScore = (isFromBehind ? 35 : 5) + (isAggressivePress ? 10 : 0) + Math.random() * 55;
+    const maliceScore = (isFromBehind ? 35 : 10) + (isAggressivePress ? 10 : 0) + Math.random() * 55;
+    const inPenaltyBox =
+      (isOwnerHome ? owner.x >= 83 : owner.x <= 17) && owner.y >= 22 && owner.y <= 78;
 
     let cardSeverity = 'FOUL_ONLY';
     const teamRedCount = defTeamObj?.stats?.redCards || 0;
-    if (isFromBehind && maliceScore >= 96 && teamRedCount === 0) {
+    if (isFromBehind && maliceScore >= 92 && teamRedCount === 0) {
       cardSeverity = 'DIRECT_RED';
       adjustPlayerLiveStat(engine, chaser, { ratingDelta: -1.5, flashText: '🟥 퇴장! (-1.5)', flashColor: '#ef4444', now });
-    } else if (maliceScore >= 68 && !alreadyBooked) {
+    } else if (maliceScore >= 62 && (!alreadyBooked || maliceScore >= 85)) {
       cardSeverity = 'YELLOW';
       adjustPlayerLiveStat(engine, chaser, { ratingDelta: -0.4, flashText: '🟨 경고 (-0.4)', flashColor: '#facc15', now });
     } else {
-      adjustPlayerLiveStat(engine, chaser, { ratingDelta: -0.15, flashText: '📢 파울 (-0.1)', flashColor: '#fb923c', now });
+      adjustPlayerLiveStat(engine, chaser, { ratingDelta: -0.15, flashText: '📢 반칙 (-0.1)', flashColor: '#fb923c', now });
     }
+
+    const isPenaltyAwarded = inPenaltyBox && (isFromBehind || maliceScore >= 45);
+    const setPieceResult = isPenaltyAwarded ? 'PENALTY' : 'FREE_KICK';
 
     if (typeof store.recordCanvasFoulAndCard === 'function') {
       store.recordCanvasFoulAndCard({
@@ -1046,11 +1360,12 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
         victimName: owner.name,
         isFromBehind,
         cardSeverity,
+        setPieceResult,
       });
     }
 
-    chaser.stunUntil = now + 700;
-    owner.burstUntil = now + 600;
+    // 반칙 위치에서 프리킥 또는 페널티킥으로 플레이 재개
+    setupFoulRestartPlay(engine, owner.team, owner.x, owner.y, isPenaltyAwarded, now);
     return;
   }
 
@@ -1104,9 +1419,6 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   chaser.stunUntil = now + 800;
 }
 
-/**
- * [신규 핵심 기능: 문전 및 중원 공중볼 수비/미드필더 헤딩 커팅(Aerial Header Clearance) 포함 볼 물리 엔진]
- */
 function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now) {
   const { ball } = engine;
   const simSpeed = clamp(playbackSpeed || 1, 1, 2.5);
@@ -1137,6 +1449,11 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
         pushAttackersAwayFromKeeper(engine, attackSide);
 
         if (enemyGk && ball.shotOutcome === 'SAVED') {
+          // 골키퍼 선방 시 35% 확률로 코너킥으로 이어짐
+          if (Math.random() < 0.35) {
+            setupCornerKickPlay(engine, attackSide, now);
+            return;
+          }
           ball.mode = 'LOCKED';
           ball.ownerUid = enemyGk.uid;
           ball.holdFrames = 0;
@@ -1216,14 +1533,12 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
     const remainDist = Math.hypot(receiver.x - ball.x, receiver.y - ball.y);
     const flightProgress = clamp(1 - remainDist / totalDist, 0, 1);
 
-    // 공중볼일 경우 포물선 궤적(z 높이: 최고 18px) 계산
     if (ball.isAerial) {
       ball.z = Math.sin(flightProgress * Math.PI) * 18;
     } else {
       ball.z = 0;
     }
 
-    // 공중볼(크로스/롱패스) 수비수, 미드필더 점프 헤딩 커팅 판정
     if (ball.isAerial && !ball.aerialContestResolved && (flightProgress >= 0.65 || remainDist <= 7.5)) {
       const aerialDefenders = activePlayers
         .filter(
@@ -1243,21 +1558,19 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
         const attAerialPower =
           (receiver.baseStats?.physical || 74) * 0.55 + (receiver.baseStats?.shooting || 74) * 0.45;
 
-        // 센터백(CB)이나 수비형 미드필더(CDM)는 제공권 보너스 부여
         const roleBonus = CENTERBACK_ROLES.includes(defender.slotRoleCode) || defender.slotRoleCode === 'CDM' ? 8 : 0;
-        const headerWinProb = clamp(0.52 + (defAerialPower + roleBonus - attAerialPower) * 0.018, 0.25, 0.82);
+        const headerWinProb = clamp(0.50 + (defAerialPower + roleBonus - attAerialPower) * 0.018, 0.25, 0.78);
 
         defender.jumpUntil = now + 520;
         receiver.jumpUntil = now + 520;
 
         if (Math.random() < headerWinProb) {
-          // 수비수/미드필더가 점프 헤딩 커팅 승리 -> 전방 아군 미드필더 쪽으로 머리로 강하게 받아쳐 클리어링
           const passer = ball.lastPasserUid ? getAgentByUid(engine, ball.lastPasserUid) : null;
           const isInBox = defender.team === 'HOME' ? ball.x <= 32 : ball.x >= 68;
 
           adjustPlayerLiveStat(engine, defender, {
             ratingDelta: +0.35,
-            staminaDrain: 0.28,
+            staminaDrain: 0.25,
             flashText: isInBox ? '💥 문전 헤딩 커팅! (+0.3)' : '💥 중원 헤딩 커팅! (+0.3)',
             flashColor: '#38bdf8',
             now,
@@ -1283,7 +1596,6 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
             store.recordCanvasTackle(defender.team, defender.slotIndex);
           }
 
-          // 헤딩으로 걷어낸 공을 전방의 아군 미드필더/공격수에게 즉시 연결
           const clearDir = defender.team === 'HOME' ? 1 : -1;
           const clearMates = activePlayers
             .filter(
@@ -1307,11 +1619,12 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
             ball.lastPasserUid = defender.uid;
             ball.lastPasserName = defender.name;
             ball.lastPasserSlotIndex = defender.slotIndex;
+            ball.lastPasserRole = defender.role;
             ball.passFrames = 0;
             ball.teamPassChain = 1;
             ball.isKillerPass = false;
             ball.isAerial = true;
-            ball.aerialContestResolved = true; // 연쇄 헤딩 핑퐁 방지
+            ball.aerialContestResolved = true;
             engine.attackTeam = defender.team;
           } else {
             ball.mode = 'LOCKED';
@@ -1328,7 +1641,6 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
       }
     }
 
-    // 낮게 깔려가는 땅볼 패스(isAerial === false)일 때 수비수/미드필더의 발밑 인터셉트 판정
     if (!ball.isAerial && !ball.isGkClearance) {
       const interceptors = activePlayers
         .filter(
@@ -1346,7 +1658,6 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
         const passer = ball.lastPasserUid ? getAgentByUid(engine, ball.lastPasserUid) : null;
         const passStat = passer?.baseStats?.passing || 75;
 
-        // 패서의 패스 능력치 vs 수비수의 수비 능력치 차이로 인터셉트 확률 계산
         const interceptChance = clamp(0.28 + (defStat - passStat) * 0.012, 0.12, 0.52);
         if (Math.random() < interceptChance) {
           adjustPlayerLiveStat(engine, interceptor, {
@@ -1466,11 +1777,9 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
   if (ball.mode === 'GOAL_NET') {
     const store = useLiveMatchStore.getState();
     const scoringTeam = ball.shotTeam || 'HOME';
-    const cleanScorer = sanitizeName(ball.shooterName) || '스트라이커';
+    const cleanScorer = ball.shooterName || '스트라이커';
     const cleanAssister =
-      sanitizeName(ball.assisterName) && sanitizeName(ball.assisterName) !== cleanScorer
-        ? sanitizeName(ball.assisterName)
-        : null;
+      ball.assisterName && ball.assisterName !== cleanScorer ? ball.assisterName : null;
 
     if (typeof store.recordActualCanvasGoal === 'function') {
       store.recordActualCanvasGoal({
@@ -1482,6 +1791,7 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
         assisterId: ball.assisterId,
         assisterName: cleanAssister,
         goalStyle: ball.goalStyle,
+        isGkMistake: Boolean(ball.isGkMistake),
       });
     }
 
@@ -1491,7 +1801,11 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
       minute,
       team: scoringTeam,
       scorerName: cleanScorer,
-      assistDisplay: cleanAssister ? `🎯 어시스트: ${cleanAssister}` : '⚡ 단독 돌파 원더골!',
+      assistDisplay: cleanAssister
+        ? `🎯 어시스트: ${cleanAssister}`
+        : ball.isGkMistake
+        ? '⚡ 상대 키퍼 실책을 틈탄 단독 돌파 골!'
+        : '⚡ 단독 돌파 원더골!',
     });
     engine.bannerUntil = now + CELEBRATION_MS;
     engine.bannerActive = true;
@@ -1543,7 +1857,7 @@ function movePlayerSmooth(engine, player, playbackSpeed, isSprinting, weatherSpe
   const boost =
     player.burstUntil && now < player.burstUntil
       ? 1.55
-      : isSprinting
+      : isSprinting || player.isSteppingUpTrap
       ? 1.38
       : player.isOverlapping || player.isMakingRun
       ? 1.32
@@ -1567,10 +1881,11 @@ function movePlayerSmooth(engine, player, playbackSpeed, isSprinting, weatherSpe
   const actualMoved = Math.hypot(player.vx, player.vy);
   player.distanceMoved = (player.distanceMoved || 0) + actualMoved;
 
-  // 스토어 기본 체력 감소 + 실제 이동 거리 및 스프린트 여부에 따른 차등 체력 감소 합산
-  if (player.role !== 'GK' && actualMoved > 0.12) {
-    const sprintFactor = isSprinting || player.isOverlapping || player.isMakingRun ? 1.65 : 0.45;
-    const extraMoveDrain = actualMoved * 0.0055 * sprintFactor;
+  if (player.role !== 'GK' && actualMoved > 0.14) {
+    // 풀백의 과도한 체력 소모를 방지하기 위해 풀백은 추가 이동 소모 계수를 0.65배로 완화
+    const roleDrainMod = FULLBACK_ROLES.includes(player.slotRoleCode) ? 0.65 : 1.0;
+    const sprintFactor = isSprinting || player.isMakingRun ? 1.45 : 0.4;
+    const extraMoveDrain = actualMoved * 0.0042 * sprintFactor * roleDrainMod;
     adjustPlayerLiveStat(engine, player, { staminaDrain: extraMoveDrain });
   }
 }
@@ -1585,6 +1900,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
     a.hasBall = ball.mode === 'LOCKED' && a.uid === ball.ownerUid;
     a.isPressing = false;
     a.isMakingRun = false;
+    a.isSteppingUpTrap = false;
     a.markingTargetUid = null;
   }
 
@@ -1592,8 +1908,16 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
   const ownerIsGk = owner && (owner.role === 'GK' || owner.roleCode === 'GK');
   const attackingTeam = owner ? owner.team : ball.x < 50 ? 'AWAY' : 'HOME';
   const defendingTeam = attackingTeam === 'HOME' ? 'AWAY' : 'HOME';
+  const defTrapEnabled = isOffsideTrapEnabled(state, defendingTeam);
 
-  // 볼 보유자를 향해 달려드는 수비팀 압박자
+  const ballInMidfieldZone = ball.x >= 30 && ball.x <= 70;
+  const triggerTrapStepUp = defTrapEnabled && !ownerIsGk && ballInMidfieldZone && ball.mode === 'LOCKED';
+
+  const synchronizedTrapLineX =
+    defendingTeam === 'HOME'
+      ? clamp(28 + (ball.x - 50) * 0.35 + (triggerTrapStepUp ? 6.0 : 0), 22, 46)
+      : clamp(72 + (ball.x - 50) * 0.35 - (triggerTrapStepUp ? 6.0 : 0), 54, 78);
+
   const defCandidates = ownerIsGk
     ? []
     : active
@@ -1605,34 +1929,35 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
   const secondaryChaserUid =
     defCandidates[1] && distance(defCandidates[1], ball) <= 22 ? defCandidates[1].uid : null;
 
-  if (owner && !ownerIsGk && primaryChaserUid) {
+  if (owner && !ownerIsGk && primaryChaserUid && !ball.setPieceState) {
     const chaser = getAgentByUid(engine, primaryChaserUid);
     if (chaser && now >= (chaser.stunUntil || 0) && distance(chaser, owner) <= 3.3) {
       resolveOneOnOneDuel(engine, owner, chaser, state, now);
     }
   }
 
-  // 수비수(DF)와 수비형 미드필더(CDM)에게 침투하는 상대 공격수 1:1 대인 마킹 할당 
   const enemyAttackers = active.filter(
     (p) => p.team === attackingTeam && (ATTACKER_ROLES.includes(p.slotRoleCode) || p.slotRoleCode === 'CAM')
   );
   const assignedAttackers = new Set();
 
-  for (const def of active) {
-    if (
-      def.team !== defendingTeam ||
-      (def.role !== 'DF' && def.slotRoleCode !== 'CDM') ||
-      def.uid === primaryChaserUid
-    ) {
-      continue;
-    }
-    const threat = enemyAttackers
-      .filter((att) => !assignedAttackers.has(att.uid) && Math.abs(att.y - def.baseY) <= 24)
-      .sort((a, b) => distance(a, def) - distance(b, def))[0];
+  if (!defTrapEnabled) {
+    for (const def of active) {
+      if (
+        def.team !== defendingTeam ||
+        (def.role !== 'DF' && def.slotRoleCode !== 'CDM') ||
+        def.uid === primaryChaserUid
+      ) {
+        continue;
+      }
+      const threat = enemyAttackers
+        .filter((att) => !assignedAttackers.has(att.uid) && Math.abs(att.y - def.baseY) <= 24)
+        .sort((a, b) => distance(a, def) - distance(b, def))[0];
 
-    if (threat) {
-      def.markingTargetUid = threat.uid;
-      assignedAttackers.add(threat.uid);
+      if (threat) {
+        def.markingTargetUid = threat.uid;
+        assignedAttackers.add(threat.uid);
+      }
     }
   }
 
@@ -1674,7 +1999,6 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       (p.role === 'DF' || MIDFIELDER_ROLES.includes(p.slotRoleCode)) &&
       Math.hypot(ball.targetX - p.x, ball.targetY - p.y) <= 16
     ) {
-      // 문전이나 중원으로 공중볼이 날아오면 근처 수비수/미드필더가 낙하지점으로 빠르게 이동
       p.targetX = ball.targetX;
       p.targetY = ball.targetY;
       p.isPressing = true;
@@ -1685,8 +2009,11 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       const goalX = p.team === 'HOME' ? 10 : 90;
       p.targetX = ball.x + (goalX - ball.x) * 0.18;
       p.targetY = clamp(ball.y + (p.baseY < ball.y ? -5 : 5), 10, 90);
+    } else if (!isMyTeamAttacking && p.role === 'DF' && defTrapEnabled) {
+      p.targetX = synchronizedTrapLineX;
+      p.targetY = clamp(p.baseY + (ball.y - 50) * 0.12, 12, 88);
+      p.isSteppingUpTrap = triggerTrapStepUp;
     } else if (!isMyTeamAttacking && p.markingTargetUid) {
-      // 침투하는 상대 공격수보다 항상 우리 골문 쪽으로 3.5m 더 깊숙이 위치하여 뒷공간 차단
       const markTarget = getAgentByUid(engine, p.markingTargetUid);
       if (markTarget) {
         const goalSideOffset = p.team === 'HOME' ? -3.8 : 3.8;
@@ -1713,13 +2040,11 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
         p.targetX = p.team === 'HOME' ? clamp(Math.max(ball.x + 10, 66), 52, 76) : clamp(Math.min(ball.x - 10, 34), 24, 48);
         p.targetY = p.baseY < 50 ? 9 : 91;
       } else if (CENTERBACK_ROLES.includes(p.slotRoleCode)) {
-        // 센터백(CB)은 공격 시에도 하프라인 너머로 올라가지 않고 뒷공간을 철저히 사수
         const cbPush = isMyTeamAttacking ? 6 * dir : -6 * dir;
         const rawCbX = p.baseX + teamShiftX * 0.55 + cbPush;
         p.targetX = p.team === 'HOME' ? clamp(rawCbX, 14, 36) : clamp(rawCbX, 64, 86);
         p.targetY = clamp(p.baseY + teamShiftY * 0.7, 16, 84);
       } else if (isFullback) {
-        // 오버래핑하지 않는 반대편 풀백도 수비 밸런스를 위해 후방 라인 유지
         const fbPush = isMyTeamAttacking ? 8 * dir : -6 * dir;
         const rawFbX = p.baseX + teamShiftX * 0.7 + fbPush;
         p.targetX = p.team === 'HOME' ? clamp(rawFbX, 16, 48) : clamp(rawFbX, 52, 84);
@@ -1729,7 +2054,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
           p.isMakingRun = isBallSide;
           const runDepth = isBallSide ? 16 * dir : 10 * dir;
           const cutInY = isBallSide ? p.baseY : p.baseY + (50 - p.baseY) * 0.38;
-          p.targetX = clamp(p.baseX + teamShiftX + runDepth + individualWaveX, 22, 80);
+          p.targetX = clamp(p.baseX + teamShiftX + runDepth + individualWaveX, 22, 82);
           p.targetY = clamp(cutInY + individualWaveY, 10, 90);
         } else {
           p.targetX = clamp(p.baseX + teamShiftX * 0.7 - 8 * dir, 20, 80);
@@ -1746,10 +2071,9 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
           p.targetY = clamp(p.baseY + teamShiftY + (ball.y - p.baseY) * 0.22, 14, 86);
         }
       } else {
-        // 스트라이커(ST)는 공격 시 전방으로 적극적으로 침투하며 상대 수비 뒷공간을 공략  
         p.isMakingRun = isMyTeamAttacking;
-        const strikerPush = isMyTeamAttacking ? 12 * dir : -6 * dir;
-        p.targetX = clamp(p.baseX + teamShiftX + strikerPush + individualWaveX, 22, 80);
+        const strikerPush = isMyTeamAttacking ? 13 * dir : -6 * dir;
+        p.targetX = clamp(p.baseX + teamShiftX + strikerPush + individualWaveX, 22, 82);
         p.targetY = clamp(p.baseY + teamShiftY + individualWaveY * 1.2, 18, 82);
       }
     }
@@ -1780,7 +2104,14 @@ function drawFlash(ctx, agent, px, py, now) {
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
       ctx.fillStyle = '#38bdf8';
-      ctx.fillText('🏃 OVERLAP!', px, py - 22);
+      ctx.fillText('🏃 OVERLAP', px, py - 22);
+      ctx.restore();
+    } else if (agent.isSteppingUpTrap) {
+      ctx.save();
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#2dd4bf';
+      ctx.fillText('🪤 TRAP LINE', px, py - 21);
       ctx.restore();
     } else if (agent.isPressing && !agent.hasBall) {
       ctx.save();
@@ -1807,7 +2138,7 @@ function drawFlash(ctx, agent, px, py, now) {
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#2dd4bf';
-    ctx.fillText('🎯 킬패스!', px, py - 25 + bob);
+    ctx.fillText('🎯 킬패스', px, py - 25 + bob);
   } else {
     const label = agent.flash.type === 'SUB' ? '🔄 SUB IN' : '📢 FOUL';
     ctx.font = 'bold 11px sans-serif';
@@ -1820,6 +2151,65 @@ function drawFlash(ctx, agent, px, py, now) {
     ctx.fillText(label, px, py - 31 + bob);
   }
   ctx.restore();
+}
+
+function drawOffsideAndTrapLines(ctx, engine, state, now) {
+  const active = [...engine.agents.values()].filter((a) => !a.isSentOff);
+
+  for (const side of ['HOME', 'AWAY']) {
+    if (isOffsideTrapEnabled(state, side)) {
+      const lineX = getLastDefenderLineX(active, side);
+      const px = toPx(lineX);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(45, 212, 191, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]);
+      ctx.beginPath();
+      ctx.moveTo(px, MARGIN);
+      ctx.lineTo(px, HEIGHT - MARGIN);
+      ctx.stroke();
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = 'rgba(45, 212, 191, 0.85)';
+      ctx.textAlign = 'center';
+      ctx.fillText('🪤 OFFSIDE TRAP LINE', px, MARGIN + 12);
+      ctx.restore();
+    }
+  }
+
+  if (engine.offsideVisual && now < engine.offsideVisual.until) {
+    const ov = engine.offsideVisual;
+    const linePx = toPx(ov.lineX);
+    const attPx = toPx(ov.attackerX);
+    const attPy = toPy(ov.attackerY);
+
+    ctx.save();
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2.8;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(linePx, MARGIN);
+    ctx.lineTo(linePx, HEIGHT - MARGIN);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.88)';
+    ctx.fillRect(linePx - 75, MARGIN + 18, 150, 22);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      ov.trapActive ? `🚩 오프사이드 트랩 적중 (${ov.attackerName})` : `🚩 OFFSIDE (${ov.attackerName})`,
+      linePx,
+      MARGIN + 29
+    );
+
+    ctx.beginPath();
+    ctx.arc(attPx, attPy, 19, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function drawSlidingAndHeaderEffects(ctx, engine, now) {
@@ -1843,7 +2233,6 @@ function drawSlidingAndHeaderEffects(ctx, engine, now) {
     ctx.restore();
   }
 
-  // 공중볼 헤딩 커팅 충격파 이펙트 렌더링
   engine.headerEffects = (engine.headerEffects || []).filter((ef) => now < ef.until);
   for (const ef of engine.headerEffects) {
     const alpha = clamp((ef.until - now) / 550, 0, 1);
@@ -1870,7 +2259,6 @@ function drawPlayersAndBall(ctx, engine, now) {
     const py = toPy(a.y) + jumpOffset;
     const isSliding = a.slideUntil && now < a.slideUntil;
 
-    // 그림자는 바닥(toPy(a.y))에 고정하여 점프 시 입체감 표현
     ctx.fillStyle = 'rgba(0,0,0,0.32)';
     ctx.beginPath();
     ctx.ellipse(
@@ -1919,8 +2307,16 @@ function drawPlayersAndBall(ctx, engine, now) {
       ctx.restore();
     } else {
       ctx.fillStyle = fill;
-      ctx.strokeStyle = isJumping ? '#fde047' : a.isOverlapping ? '#38bdf8' : a.isPressing ? '#fb923c' : '#ffffff';
-      ctx.lineWidth = isJumping || a.isOverlapping || a.isPressing ? 2.8 : 2;
+      ctx.strokeStyle = isJumping
+        ? '#fde047'
+        : a.isSteppingUpTrap
+        ? '#2dd4bf'
+        : a.isOverlapping
+        ? '#38bdf8'
+        : a.isPressing
+        ? '#fb923c'
+        : '#ffffff';
+      ctx.lineWidth = isJumping || a.isSteppingUpTrap || a.isOverlapping || a.isPressing ? 2.8 : 2;
       ctx.beginPath();
       ctx.arc(px, py, isJumping ? 13.5 : 12, 0, Math.PI * 2);
       ctx.fill();
@@ -1983,7 +2379,6 @@ function drawPlayersAndBall(ctx, engine, now) {
   const airOffset = ball.z || 0;
   const by = groundBy - airOffset;
 
-  // 공 그림자 (공중볼일 때는 땅에 그림자가 남고 공은 위로 떠올라 포물선 비행)
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath();
   ctx.ellipse(bx + 1.5, groundBy + 4, Math.max(3, 5 - airOffset * 0.12), 2.5, 0, 0, Math.PI * 2);
@@ -2065,7 +2460,7 @@ function drawActionFlashes(ctx, engine, now) {
       ctx.fillStyle = '#fde047';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('💥 SHOOT!', px, py - 22);
+      ctx.fillText('💥 SHOOT', px, py - 22);
       ctx.restore();
     }
   }
@@ -2080,7 +2475,7 @@ function drawActionFlashes(ctx, engine, now) {
       ctx.fillStyle = '#34d399';
       ctx.font = 'bold 13px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(ball.keeperSaveText || '🧤 SAVE!', px, py - 22);
+      ctx.fillText(ball.keeperSaveText || '🧤 SAVE', px, py - 22);
       ctx.restore();
     }
   }
@@ -2090,10 +2485,22 @@ function render(ctx, engine, state, now) {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
   drawPitch(ctx, WIDTH, HEIGHT, state.weather?.code);
   if (!state.homeTeam || !state.awayTeam) return;
+  drawOffsideAndTrapLines(ctx, engine, state, now);
   drawSlidingAndHeaderEffects(ctx, engine, now);
   drawShotAndKillerPassTrail(ctx, engine.ball);
   drawPlayersAndBall(ctx, engine, now);
   drawActionFlashes(ctx, engine, now);
+
+  // 추가시간(Stoppage Time) 표시 배지
+  if (state.inStoppageTime) {
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.9)';
+    ctx.fillRect(WIDTH - 165, 10, 145, 24);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`+${state.stoppageElapsed}' / 추가시간 ${state.addedTime}분`, WIDTH - 92, 22);
+  }
 
   if (state.isPaused && state.status === 'live') {
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
@@ -2135,36 +2542,40 @@ export default function PitchCanvas2D() {
     let rafId = 0;
 
     const loop = (now) => {
-      const state = useLiveMatchStore.getState();
-      const speed = state.playbackSpeed || 1;
+      try {
+        const state = useLiveMatchStore.getState();
+        const speed = state.playbackSpeed || 1;
 
-      if (engine.bannerActive && now >= engine.bannerUntil) {
-        engine.bannerActive = false;
-        setGoalBanner(null);
-      }
-
-      if (state.homeTeam && state.awayTeam) {
-        syncAgents(engine, state, now);
-
-        const action = state.currentTickAction;
-        if (action && action.seq !== engine.lastSeq) {
-          engine.lastSeq = action.seq;
-          applyAction(engine, action, now);
+        if (engine.bannerActive && now >= engine.bannerUntil) {
+          engine.bannerActive = false;
+          setGoalBanner(null);
         }
 
-        const isHalted =
-          Boolean(state.isPaused) ||
-          state.matchPhase === 'HALF_TIME' ||
-          state.matchPhase === 'FULL_TIME' ||
-          state.matchPhase === 'PRE_MATCH';
+        if (state.homeTeam && state.awayTeam) {
+          syncAgents(engine, state, now);
 
-        if (!isHalted) {
-          updateBallAndMatchFlow(engine, state, now, setGoalBanner);
-          updatePlayerPositions(engine, state, speed, now);
+          const action = state.currentTickAction;
+          if (action && action.seq !== engine.lastSeq) {
+            engine.lastSeq = action.seq;
+            applyAction(engine, action, now);
+          }
+
+          const isHalted =
+            Boolean(state.isPaused) ||
+            state.matchPhase === 'HALF_TIME' ||
+            state.matchPhase === 'FULL_TIME' ||
+            state.matchPhase === 'PRE_MATCH';
+
+          if (!isHalted) {
+            updateBallAndMatchFlow(engine, state, now, setGoalBanner);
+            updatePlayerPositions(engine, state, speed, now);
+          }
         }
-      }
 
-      render(ctx, engine, state, now);
+        render(ctx, engine, state, now);
+      } catch (err) {
+        console.error('[PitchCanvas2D] loop error:', err);
+      }
       rafId = requestAnimationFrame(loop);
     };
 
@@ -2183,7 +2594,7 @@ export default function PitchCanvas2D() {
         <div className="absolute inset-0 flex items-center justify-center bg-black/55 backdrop-blur-sm z-30 pointer-events-none">
           <div className="bg-slate-900/95 border-2 border-amber-400 rounded-2xl px-10 py-6 text-center shadow-2xl">
             <div className="text-amber-400 font-black text-4xl tracking-widest mb-2">
-              ⚽ GOAL!! ({goalBanner.minute}&apos;)
+              ⚽ GOAL ({goalBanner.minute}&apos;)
             </div>
             <div className="text-white font-extrabold text-2xl mb-1">
               득점: {goalBanner.scorerName}

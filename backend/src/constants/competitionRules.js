@@ -1,23 +1,23 @@
-/** 대회(Competition) 모드 규칙 상수 */
+/** 대회 모드 규칙 상수 (2026 월드컵 48개국 체제 반영) */
 
 export const MODES = Object.freeze(['LEAGUE', 'CHAMPIONS_CUP', 'WORLD_CUP', 'CHALLENGE_TOWER', 'RANKED']);
 
 export const MODE_LABELS = Object.freeze({
   LEAGUE: '프로 리그 커리어 모드',
   CHAMPIONS_CUP: '챔피언스 컵 토너먼트',
-  WORLD_CUP: '내셔널 월드컵 모드',
+  WORLD_CUP: '2026 내셔널 월드컵 (48개국)',
   CHALLENGE_TOWER: '시나리오 챌린지 타워',
   RANKED: '시뮬레이션 랭크 매치',
 });
 
 export const LEAGUE = Object.freeze({
-  TEAMS: 20, // 기본 20개 구단 풀리그 (CompetitionService에서 리그별 20/24/18/12/14팀 동적 적용)
+  TEAMS: 20,
   ROUNDS: 38,
   START_DIVISION: 1,
   STRENGTH_BASE: { 1: 80, 2: 74, 3: 68 },
   STRENGTH_SPREAD: 7,
   POINTS: { WIN: 3, DRAW: 1, LOSE: 0 },
-  PROMOTE_RANK: 2,
+  PROMOTE_RANK: 3,
   RELEGATE_RANK: 18,
   SEASON_REWARD: {
     1: { gold: 35000, cashFree: 350 },
@@ -31,28 +31,29 @@ export const CUP = Object.freeze({
   ROUND_NAMES: ['16강', '8강', '4강', '결승'],
   STRENGTH_RANGE: [74, 91],
   ROUND_WIN_REWARD: [
-    { gold: 2500, cashFree: 10 },
-    { gold: 5000, cashFree: 30 },
-    { gold: 10000, cashFree: 70 },
-    { gold: 30000, cashFree: 350 },
-  ],
-  ELIMINATED_REWARD: { gold: 800, cashFree: 0 },
-});
-
-export const WORLD_CUP = Object.freeze({
-  GROUPS: ['A', 'B', 'C', 'D'],
-  STRENGTH_RANGE: [75, 91],
-  KNOCKOUT_NAMES: ['8강', '4강', '결승'],
-  GROUP_ADVANCE_REWARD: { gold: 4000, cashFree: 30 },
-  KNOCKOUT_REWARD: [
-    { gold: 6000, cashFree: 40 },
+    { gold: 3000, cashFree: 15 },
+    { gold: 6000, cashFree: 35 },
     { gold: 12000, cashFree: 80 },
-    { gold: 45000, cashFree: 450 },
+    { gold: 35000, cashFree: 400 },
   ],
   ELIMINATED_REWARD: { gold: 1000, cashFree: 0 },
 });
 
-/** 시나리오 챌린지 타워 스테이지 */
+export const WORLD_CUP = Object.freeze({
+  GROUPS: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'],
+  STRENGTH_RANGE: [72, 92],
+  KNOCKOUT_NAMES: ['32강', '16강', '8강', '4강', '결승'],
+  GROUP_ADVANCE_REWARD: { gold: 4500, cashFree: 35 },
+  KNOCKOUT_REWARD: [
+    { gold: 5000, cashFree: 30 },
+    { gold: 8000, cashFree: 50 },
+    { gold: 14000, cashFree: 90 },
+    { gold: 22000, cashFree: 150 },
+    { gold: 50000, cashFree: 500 },
+  ],
+  ELIMINATED_REWARD: { gold: 1200, cashFree: 0 },
+});
+
 export const TOWER_STAGES = Object.freeze([
   {
     id: 1,
@@ -136,6 +137,9 @@ export const RANKED = Object.freeze({
   WIN_REWARD: { gold: 1000, cashFree: 10 },
 });
 
+/**
+ * 2026 월드컵 본선 48개국 리스트 (유저 국가를 제외한 47개국 매칭 풀 포함)
+ */
 export const AI_CLUB_NAMES = Object.freeze({
   LEAGUE: [
     '맨체스터 블루', '노스 런던 레드', '머지사이드 레드', '노스이스트 런던', '웨스트 런던 블루',
@@ -150,9 +154,12 @@ export const AI_CLUB_NAMES = Object.freeze({
     '마드리드 로히블랑코', '밀라노 레드블랙', '피에몬테 블랙화이트', '노스이스트 런던', '나폴리 아주리',
   ],
   WORLD_CUP: [
-    '대한민국', '브라질', '아르헨티나', '프랑스', '잉글랜드',
-    '스페인', '독일', '포르투갈', '네덜란드', '이탈리아',
-    '크로아티아', '일본', '모로코', '미국', '우루과이',
+    '대한민국', '아르헨티나', '프랑스', '잉글랜드', '브라질', '스페인', '독일', '포르투갈',
+    '네덜란드', '이탈리아', '크로아티아', '벨기에', '우루과이', '콜롬비아', '일본', '모로코',
+    '미국', '멕시코', '세네갈', '스위스', '덴마크', '오스트리아', '튀르키예', '우크라이나',
+    '스웨덴', '폴란드', '세르비아', '나이지리아', '이집트', '코트디부아르', '알제리', '카메룬',
+    '가나', '말리', '튀니지', '호주', '이란', '사우디아라비아', '카타르', '우즈베키스탄',
+    '이라크', '캐나다', '코스타리카', '파나마', '자메이카', '에콰도르', '칠레', '파라과이',
   ],
   RANKED: [
     '마드리드 화이트 AI', '맨체스터 블루 AI', '뮌헨 레드 AI', '노스이스트 런던 AI', '파리 블루레드 AI',

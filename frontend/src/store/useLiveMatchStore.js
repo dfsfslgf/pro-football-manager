@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { FORMATIONS, getFormationSlots } from '../constants/formations.js';
+import { FORMATIONS, FORMATION_CODES, getFormationSlots } from '../constants/formations.js';
 import { MATCH_RULES, TICK_BASE_MS } from '../constants/matchConfig.js';
 import {
   DEFAULT_POSITION_DRAIN,
@@ -10,6 +10,7 @@ import {
   POSITION_STAMINA_DRAIN_MULTIPLIER,
   TEAM_TACTIC_GROUPS,
   TEAM_TACTIC_LABELS,
+  TOUCHLINE_SHOUTS,
   applySlotToPlayer,
   assignPlayersByFamiliarity,
   getInstructionCategory,
@@ -27,21 +28,29 @@ import { finishLiveMatch } from '../api/matchApi.js';
 import { errorMessage } from '../api/client.js';
 
 const WEATHER_TYPES = [
-  { code: 'SUNNY', label: '☀️ 맑음 (쾌적한 잔디)', passMod: 1.0, speedMod: 1.0, staminaMod: 1.0, longShotMod: 1.0 },
-  { code: 'RAINY', label: '🌧️ 우천 (미끄러운 잔디 · 슬라이딩 태클 빈도↑)', passMod: 0.92, speedMod: 0.95, staminaMod: 1.1, longShotMod: 1.15 },
-  { code: 'WINDY', label: '💨 강풍 (롱패스 변칙 궤적)', passMod: 0.95, speedMod: 0.98, staminaMod: 1.04, longShotMod: 1.08 },
-  { code: 'NIGHT_CLEAR', label: '🌙 야간 경기 (최상의 집중력)', passMod: 1.03, speedMod: 1.02, staminaMod: 0.97, longShotMod: 1.02 },
+  { code: 'SUNNY', label: '맑음 (쾌적한 잔디)', passMod: 1.0, speedMod: 1.0, staminaMod: 1.0, longShotMod: 1.0 },
+  { code: 'RAINY', label: '우천 (미끄러운 잔디)', passMod: 0.92, speedMod: 0.95, staminaMod: 1.08, longShotMod: 1.12 },
+  { code: 'WINDY', label: '강풍 (롱패스 변칙 궤적)', passMod: 0.95, speedMod: 0.98, staminaMod: 1.03, longShotMod: 1.06 },
+  { code: 'NIGHT_CLEAR', label: '야간 경기 (최상의 집중력)', passMod: 1.03, speedMod: 1.02, staminaMod: 0.97, longShotMod: 1.02 },
 ];
 
 export function getSafeName(player, fallback = '출전 선수') {
   if (!player) return fallback;
   if (typeof player === 'string') {
     const s = player.trim();
-    return s && !s.toLowerCase().includes('undefined') && !s.toLowerCase().includes('null') ? s : fallback;
+    if (s && !s.toLowerCase().includes('undefined') && !s.toLowerCase().includes('null') && !/^[HA]#\d+$/i.test(s)) {
+      return s;
+    }
+    return fallback;
   }
-  const rawName = player.name || player.safeName || player.playerName || player.koreanName || player.label;
-  if (!rawName || String(rawName).toLowerCase().includes('undefined') || String(rawName).trim() === '') {
-    return `${player.slotRoleCode || player.mainPosition || 'FW'} #${player.backNumber || 9}`;
+  const rawName = player.name || player.safeName || player.playerName || player.koreanName;
+  if (
+    !rawName ||
+    String(rawName).toLowerCase().includes('undefined') ||
+    String(rawName).trim() === '' ||
+    /^[HA]#\d+$/i.test(String(rawName).trim())
+  ) {
+    return fallback;
   }
   return String(rawName).trim();
 }
@@ -107,11 +116,14 @@ export function buildFieldTeam({ side, clubId, name, emblem, formation, starters
     tackles: 0,
     passesCompleted: 0,
     morale: 75,
+    liveRating: 6.0,
+    rating: 6.0,
   };
   const builtStarters = starters.map((p, i) => {
     const slot = slots[i] || { baseX: 50, baseY: 50, label: 'CM', role: 'MF' };
+    const startStamina = p.currentStamina ?? p.stamina ?? 100;
     const player = applySlotToPlayer(
-      { ...p, ...matchState, currentStamina: p.stamina ?? 100, instruction: p.instruction || undefined },
+      { ...p, ...matchState, stamina: startStamina, currentStamina: startStamina, instruction: p.instruction || undefined },
       slot
     );
     player.uid = `${side}_${i}`;
@@ -119,24 +131,28 @@ export function buildFieldTeam({ side, clubId, name, emblem, formation, starters
     player.computedOvr = calcPlayerOvr(player);
     return player;
   });
-  const builtBench = (bench || []).map((p, bIdx) => ({
-    ...p,
-    ...matchState,
-    slotIndex: null,
-    slotRoleGroup: p.mainPosition,
-    slotRoleCode: p.mainPosition,
-    role: p.mainPosition,
-    label: p.mainPosition,
-    baseX: 50,
-    baseY: 50,
-    naturalPosition: p.mainPosition,
-    familiarity: 'NATURAL',
-    familiarityMultiplier: 1,
-    instruction: null,
-    currentStamina: p.stamina ?? 100,
-    computedOvr: calcPlayerOvr(p),
-    uid: `${side}_B_${p.id || bIdx}`,
-  }));
+  const builtBench = (bench || []).map((p, bIdx) => {
+    const startStamina = p.currentStamina ?? p.stamina ?? 100;
+    return {
+      ...p,
+      ...matchState,
+      slotIndex: null,
+      slotRoleGroup: p.mainPosition,
+      slotRoleCode: p.preferredRoleCode || p.mainPosition,
+      role: p.mainPosition,
+      label: p.preferredRoleCode || p.mainPosition,
+      baseX: 50,
+      baseY: 50,
+      naturalPosition: p.mainPosition,
+      familiarity: 'NATURAL',
+      familiarityMultiplier: 1,
+      instruction: null,
+      stamina: startStamina,
+      currentStamina: startStamina,
+      computedOvr: calcPlayerOvr(p),
+      uid: `${side}_B_${p.id || bIdx}`,
+    };
+  });
   const teamObj = {
     side,
     clubId,
@@ -145,6 +161,7 @@ export function buildFieldTeam({ side, clubId, name, emblem, formation, starters
     formation,
     tactics: { ...DEFAULT_TEAM_TACTICS, ...(tactics || {}) },
     talkEffect: { ...NEUTRAL_TALK_EFFECT },
+    touchlineShout: null,
     starters: builtStarters,
     bench: builtBench,
     substitutedOut: [],
@@ -177,11 +194,7 @@ function aliveOf(team) {
   return (team?.starters || []).filter((p) => p && !p.isSentOff);
 }
 
-function randomPick(arr) {
-  return arr.length ? arr[Math.floor(Math.random() * arr.length)] : null;
-}
-
-function makeEvent(minute, type, team, primary, secondary, description, isUserAction = false) {
+function makeEvent(minute, type, team, primary, secondary, description, isUserAction = false, isPenalty = false) {
   return {
     minute,
     type,
@@ -194,6 +207,7 @@ function makeEvent(minute, type, team, primary, secondary, description, isUserAc
     secondaryPlayerName: secondary ? getSafeName(secondary) : null,
     description,
     isUserAction,
+    isPenalty,
   };
 }
 
@@ -218,7 +232,7 @@ export function applyStaminaDrain(team, weatherMod = 1.0) {
     const posMod = POSITION_STAMINA_DRAIN_MULTIPLIER[p.slotRoleCode] || DEFAULT_POSITION_DRAIN;
     const teamTacticMod = p.slotRoleCode === 'GK' ? 0.35 : teamMod;
     const playerInstMod = getInstructionDef(p.instruction).staminaMul;
-    const finalDrain = baseTickDrain * posMod * teamTacticMod * playerInstMod * weatherMod;
+    const finalDrain = baseTickDrain * posMod * teamTacticMod * playerInstMod * weatherMod * 0.85;
     p.currentStamina = Math.max(MATCH_RULES.MIN_STAMINA, Number((p.currentStamina - finalDrain).toFixed(2)));
     p.minutesPlayed = (p.minutesPlayed || 0) + 1;
   }
@@ -258,9 +272,9 @@ function possessionPower(team) {
   return (
     midfieldPower(team) *
     ovrFactor *
-    getTacticEffect(t, 'passingStyle').possMul *
-    getTacticEffect(t, 'defensiveLine').possMul *
-    getTacticEffect(t, 'pressing').possMul *
+    (getTacticEffect(t, 'passingStyle').possMul || 1) *
+    (getTacticEffect(t, 'defensiveLine').possMul || 1) *
+    (getTacticEffect(t, 'pressing').possMul || 1) *
     (team.talkEffect?.possMul || 1)
   );
 }
@@ -275,6 +289,8 @@ function substitutePlayer(team, playerOut, playerIn) {
       enteredAsSub: true,
       instruction: playerOut.instruction,
       morale: 82,
+      liveRating: 6.0,
+      rating: 6.0,
     },
     slotDef
   );
@@ -305,11 +321,53 @@ function swapSlots(team, slotIndexA, slotIndexB) {
   team.avgOvr = calcTeamAvgOvr(team);
 }
 
+function rebuildStartersForFormation(team, newFormation) {
+  const slots = getFormationSlots(newFormation, team.side);
+  const alive = team.starters.filter((p) => !p.isSentOff);
+  const dead = team.starters.filter((p) => p.isSentOff);
+  const result = new Array(slots.length).fill(null);
+  for (const d of dead) {
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    slots.forEach((s, i) => {
+      if (result[i]) return;
+      const score =
+        (normalizeRoleCode(s.label) === normalizeRoleCode(d.slotRoleCode) ? 3 : 0) +
+        (s.role === d.slotRoleGroup ? 2 : 0) +
+        (1 - Math.abs(s.baseX - d.baseX) / 100);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    });
+    if (bestIndex >= 0) result[bestIndex] = applySlotToPlayer(d, slots[bestIndex]);
+  }
+  const freeIndexes = result.map((v, i) => (v ? -1 : i)).filter((i) => i >= 0);
+  const assigned = assignPlayersByFamiliarity(
+    alive,
+    freeIndexes.map((i) => slots[i])
+  );
+  freeIndexes.forEach((slotIdx, k) => {
+    if (assigned[k]) result[slotIdx] = applySlotToPlayer(assigned[k], slots[slotIdx]);
+  });
+  team.starters = result.filter(Boolean).map((p, idx) => ({
+    ...p,
+    slotIndex: idx,
+    uid: `${team.side}_${idx}`,
+  }));
+  team.formation = newFormation;
+  team.avgOvr = calcTeamAvgOvr(team);
+}
+
+/**
+ * 상대 팀(AI)의 유기적인 경기 중 선수 교체, 포메이션 변경, 전술 변화 수행
+ */
 function runAiPlanB(team, opponent, minute, events) {
   const liveDefenders = aliveOf(team).filter((p) => p.slotRoleGroup === 'DF');
   const benchDefenders = team.bench.filter((p) => p.mainPosition === 'DF');
   const liveForwards = aliveOf(team).filter((p) => p.slotRoleGroup === 'FW');
   const vacatedDefenderSlot = team.starters.find((p) => p.isSentOff && p.slotRoleGroup === 'DF');
+
   if (liveDefenders.length < 3 && team.subsLeft > 0 && benchDefenders.length > 0 && liveForwards.length >= 2 && vacatedDefenderSlot) {
     const playerOut = liveForwards.reduce((min, p) => (p.currentStamina < min.currentStamina ? p : min));
     const playerIn = benchDefenders.reduce((best, p) => (calcPlayerOvr(p) > calcPlayerOvr(best) ? p : best));
@@ -321,26 +379,76 @@ function runAiPlanB(team, opponent, minute, events) {
     if (team.tactics.mentality !== 'DEFENSIVE' && team.tactics.mentality !== 'PARK_THE_BUS') {
       team.tactics.mentality = 'DEFENSIVE';
       team.tactics.defensiveLine = 'DEEP';
-      events.push(makeEvent(minute, 'TACTIC_CHANGE', team, null, null, '수적 열세를 극복하기 위해 두 줄 수비 블록을 형성합니다.'));
+      events.push(makeEvent(minute, 'TACTIC_CHANGE', team, null, null, '수적 열세를 극복하기 위해 두 줄 수비 블록을 형성함'));
     }
   }
-  if (minute >= MATCH_RULES.PLAN_B_ROTATION_MINUTE && team.subsLeft > 0) {
-    const exhausted = aliveOf(team).filter((p) => p.currentStamina <= MATCH_RULES.PLAN_B_ROTATION_STAMINA || p.isInjured);
-    for (const playerOut of exhausted) {
+
+  // 후반 55분 이후 체력 저하(50% 이하) 또는 평점 부진(5.6 이하) 선수 유기적 교체
+  if (minute >= 55 && team.subsLeft > 0 && minute % 7 === 0) {
+    const candidatesOut = aliveOf(team)
+      .filter((p) => p.slotRoleGroup !== 'GK' && (p.currentStamina <= 52 || p.isInjured || (p.liveRating ?? 6.0) <= 5.5))
+      .sort((a, b) => a.currentStamina - b.currentStamina);
+
+    for (const playerOut of candidatesOut.slice(0, 2)) {
       if (team.subsLeft <= 0) break;
       const replacements = team.bench.filter((p) => p.mainPosition === playerOut.slotRoleGroup);
       if (replacements.length === 0) continue;
       const playerIn = replacements.reduce((best, p) => (calcPlayerOvr(p) > calcPlayerOvr(best) ? p : best));
       const outSnapshot = { ...playerOut };
       const incoming = substitutePlayer(team, playerOut, playerIn);
-      events.push(makeEvent(minute, 'SUBSTITUTION', team, incoming, outSnapshot, '체력 저하 및 부상 방지를 위한 로테이션 교체'));
+      events.push(
+        makeEvent(
+          minute,
+          'SUBSTITUTION',
+          team,
+          incoming,
+          outSnapshot,
+          `${team.name} 벤치에서 기동력 보강을 위해 ${incoming.name} 선수를 교체 투입함`
+        )
+      );
     }
   }
-  if (minute === MATCH_RULES.ALL_IN_MINUTE) {
-    const deficit = opponent.score - team.score;
-    if (deficit >= 1 && deficit <= 2 && team.tactics.mentality !== 'ALL_OUT_ATTACK') {
-      team.tactics.mentality = 'ALL_OUT_ATTACK';
-      events.push(makeEvent(minute, 'TACTIC_CHANGE', team, null, null, '패배 위기! 라인을 최대로 끌어올려 총공세(All-Out Attack)를 지시합니다!'));
+
+  // 후반 63분, 78분 점수 차에 따른 상대 팀 포메이션 및 전술 변화
+  if (minute === 63 || minute === 78) {
+    const scoreDiff = team.score - opponent.score;
+    if (scoreDiff < 0) {
+      const targetForm = minute === 78 ? '4-2-4' : '3-4-3';
+      if (FORMATIONS[targetForm] && team.formation !== targetForm) {
+        const prev = team.formation;
+        rebuildStartersForFormation(team, targetForm);
+        team.tactics.mentality = minute === 78 ? 'ALL_OUT_ATTACK' : 'ATTACKING';
+        team.tactics.pressing = 'HIGH';
+        team.tactics.tempo = 'FAST';
+        events.push(
+          makeEvent(
+            minute,
+            'TACTIC_CHANGE',
+            team,
+            null,
+            null,
+            `${team.name} 감독이 만회골을 위해 포메이션을 ${prev}에서 ${targetForm}로 변경하고 전방 압박을 지시함`
+          )
+        );
+      }
+    } else if (scoreDiff > 0 && minute === 78) {
+      const targetForm = '5-4-1';
+      if (FORMATIONS[targetForm] && team.formation !== targetForm) {
+        const prev = team.formation;
+        rebuildStartersForFormation(team, targetForm);
+        team.tactics.mentality = 'DEFENSIVE';
+        team.tactics.defensiveLine = 'DEEP';
+        events.push(
+          makeEvent(
+            minute,
+            'TACTIC_CHANGE',
+            team,
+            null,
+            null,
+            `${team.name} 감독이 리드를 굳히기 위해 포메이션을 ${prev}에서 ${targetForm}로 전환함`
+          )
+        );
+      }
     }
   }
 }
@@ -373,57 +481,7 @@ export function simulateSingleMinuteTick(home, away, minute, weather) {
     subInId: null,
   };
 
-  if (Math.random() < 0.04) {
-    const spRoll = Math.random();
-    if (spRoll < 0.5) {
-      attacker.stats.corners++;
-      action.eventType = 'SET_PIECE';
-      action.setPieceType = 'CORNER';
-      events.push(makeInfoEvent(minute, `🚩 [코너킥] ${attacker.name}의 측면 돌파가 수비 맞고 나가며 코너킥 찬스를 얻습니다.`));
-    } else {
-      attacker.stats.freeKicks = (attacker.stats.freeKicks || 0) + 1;
-      action.eventType = 'SET_PIECE';
-      action.setPieceType = 'FREE_KICK';
-      events.push(makeInfoEvent(minute, `🎯 [프리킥 찬스] ${attacker.name}, 위험 지역에서 프리킥 기회를 잡습니다.`));
-    }
-  }
-
   return { events, action };
-}
-
-function rebuildStartersForFormation(team, newFormation) {
-  const slots = getFormationSlots(newFormation, team.side);
-  const alive = team.starters.filter((p) => !p.isSentOff);
-  const dead = team.starters.filter((p) => p.isSentOff);
-  const result = new Array(slots.length).fill(null);
-  for (const d of dead) {
-    let bestIndex = -1;
-    let bestScore = -Infinity;
-    slots.forEach((s, i) => {
-      if (result[i]) return;
-      const score =
-        (normalizeRoleCode(s.label) === normalizeRoleCode(d.slotRoleCode) ? 3 : 0) +
-        (s.role === d.slotRoleGroup ? 2 : 0) +
-        (1 - Math.abs(s.baseX - d.baseX) / 100);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    });
-    if (bestIndex >= 0) result[bestIndex] = applySlotToPlayer(d, slots[bestIndex]);
-  }
-  const freeIndexes = result.map((v, i) => (v ? -1 : i)).filter((i) => i >= 0);
-  const assigned = assignPlayersByFamiliarity(alive, freeIndexes.map((i) => slots[i]));
-  freeIndexes.forEach((slotIdx, k) => {
-    if (assigned[k]) result[slotIdx] = applySlotToPlayer(assigned[k], slots[slotIdx]);
-  });
-  team.starters = result.filter(Boolean).map((p, idx) => ({
-    ...p,
-    slotIndex: idx,
-    uid: `${team.side}_${idx}`,
-  }));
-  team.formation = newFormation;
-  team.avgOvr = calcTeamAvgOvr(team);
 }
 
 function sanitizeTimelineForServer(timelineEvents, homeTeam, awayTeam) {
@@ -461,7 +519,11 @@ function sanitizeTimelineForServer(timelineEvents, homeTeam, awayTeam) {
         (evt.secondaryPlayerName && idMap.get(String(evt.secondaryPlayerName).trim())) ||
         null;
 
-      if (matchedSecondary && matchedPrimary && matchedSecondary.userPlayerId === matchedPrimary.userPlayerId) {
+      if (
+        matchedSecondary &&
+        matchedPrimary &&
+        (matchedSecondary.userPlayerId === matchedPrimary.userPlayerId || matchedSecondary.slotRoleCode === 'GK')
+      ) {
         matchedSecondary = null;
       }
 
@@ -470,11 +532,12 @@ function sanitizeTimelineForServer(timelineEvents, homeTeam, awayTeam) {
         type: evt.type,
         team: evt.team,
         primaryPlayerId: matchedPrimary ? matchedPrimary.userPlayerId : null,
-        primaryPlayerName: matchedPrimary ? matchedPrimary.name : evt.primaryPlayerName,
+        primaryPlayerName: matchedPrimary ? getSafeName(matchedPrimary) : evt.primaryPlayerName,
         secondaryPlayerId: matchedSecondary ? matchedSecondary.userPlayerId : null,
-        secondaryPlayerName: matchedSecondary ? matchedSecondary.name : null,
+        secondaryPlayerName: matchedSecondary ? getSafeName(matchedSecondary) : null,
         description: evt.description,
         isUserAction: Boolean(evt.isUserAction),
+        isPenalty: Boolean(evt.isPenalty),
       };
     });
 }
@@ -485,7 +548,6 @@ function buildFinishPayload(state) {
   const homePossession = Math.round((homeTeam.stats.possessionTicks / totalTicks) * 100);
   const cleanEvents = sanitizeTimelineForServer(state.timelineEvents, homeTeam, awayTeam);
 
-  // 레드카드 이벤트 수와 팀 레드카드 통계를 정확히 일치시켜 서버 검증 통과 보장
   const homeRedsCount = cleanEvents.filter((e) => e.team === 'HOME' && e.type === 'RED_CARD').length;
   const awayRedsCount = cleanEvents.filter((e) => e.team === 'AWAY' && e.type === 'RED_CARD').length;
 
@@ -530,12 +592,13 @@ function buildFinishPayload(state) {
         const validShots = Math.max(validSot, p.shots || 0);
         return {
           userPlayerId: p.userPlayerId,
-          stamina: Math.max(0, Math.min(100, Math.round(p.currentStamina))),
-          minutesPlayed: Math.max(1, Math.min(MATCH_RULES.MATCH_MINUTES, p.minutesPlayed || 1)),
+          stamina: Math.max(5, Math.min(100, Math.round(p.currentStamina))),
+          minutesPlayed: Math.max(1, Math.min(90, p.minutesPlayed || 1)),
           enteredAsSub: Boolean(p.enteredAsSub),
           saves: p.saves || 0,
           shots: validShots,
           shotsOnTarget: validSot,
+          liveRating: Number((p.liveRating ?? 6.0).toFixed(1)),
         };
       }),
   };
@@ -562,6 +625,11 @@ const initialState = {
   status: 'idle',
   matchPhase: 'PRE_MATCH',
   minute: 0,
+  addedTime: 0,
+  firstHalfAdded: 2,
+  secondHalfAdded: 3,
+  inStoppageTime: false,
+  stoppageElapsed: 0,
   isPaused: false,
   playbackSpeed: 1,
   weather: WEATHER_TYPES[0],
@@ -577,6 +645,7 @@ const initialState = {
   isHalfTimeModalOpen: false,
   halfTimeSummary: null,
   lockerTalk: null,
+  lastTouchlineShoutMinute: -10,
   finishState: { status: 'idle', message: null, report: null },
   lastGoalEvent: null,
   participatedPlayers: [],
@@ -586,6 +655,31 @@ export const useLiveMatchStore = create((set, get) => ({
   ...initialState,
 
   clearLastGoalEvent: () => set({ lastGoalEvent: null }),
+
+  /**
+   * 캔버스에서 변동된 실시간 평점(liveRating)과 추가 체력 소모(currentStamina)를 스토어의 선수 상태에 동기화함
+   */
+  syncCanvasPlayerState: (teamSide, slotIndex, { liveRating, currentStamina }) =>
+    set((state) => {
+      const key = teamSide === 'HOME' ? 'homeTeam' : 'awayTeam';
+      const targetTeam = state[key];
+      if (!targetTeam || !Array.isArray(targetTeam.starters) || !targetTeam.starters[slotIndex]) return {};
+      const updatedStarters = targetTeam.starters.map((p, idx) => {
+        if (idx !== slotIndex || !p) return p;
+        return {
+          ...p,
+          liveRating: liveRating !== undefined ? liveRating : p.liveRating,
+          rating: liveRating !== undefined ? liveRating : p.rating,
+          currentStamina: currentStamina !== undefined ? currentStamina : p.currentStamina,
+        };
+      });
+      return {
+        [key]: {
+          ...targetTeam,
+          starters: updatedStarters,
+        },
+      };
+    }),
 
   recordCanvasPass: (teamSide, isCompleted = true) =>
     set((state) => {
@@ -627,24 +721,54 @@ export const useLiveMatchStore = create((set, get) => ({
       };
     }),
 
+  recordCanvasCorner: (teamSide, takerName) =>
+    set((state) => {
+      const minute = Math.max(1, state.minute || 1);
+      const key = teamSide === 'HOME' ? 'homeTeam' : 'awayTeam';
+      const attTeam = state[key];
+      if (!attTeam) return {};
+      return {
+        [key]: {
+          ...attTeam,
+          stats: {
+            ...attTeam.stats,
+            corners: (attTeam.stats?.corners || 0) + 1,
+          },
+        },
+        timelineEvents: [
+          ...(state.timelineEvents || []),
+          makeInfoEvent(minute, `🚩 [코너킥] ${attTeam.name}의 ${takerName || '키커'} 선수가 코너 플래그에서 문전으로 크로스를 준비합니다.`),
+        ],
+      };
+    }),
+
   /**
-   * 캔버스에서 슬라이딩 태클 파울 및 백태클(악의성 기반 경고/다이렉트 퇴장) 발생 시 즉시 반영
+   * 태클 반칙, 경고/퇴장, 프리킥 및 페널티킥 판정을 타임라인과 통계에 기록함
    */
-  recordCanvasFoulAndCard: ({ defenderTeamSide, foulerSlotIndex, victimName, isFromBehind, cardSeverity }) =>
+  recordCanvasFoulAndCard: ({ defenderTeamSide, foulerSlotIndex, victimName, isFromBehind, cardSeverity, setPieceResult }) =>
     set((state) => {
       const minute = Math.max(1, state.minute || 1);
       const isHomeDef = defenderTeamSide === 'HOME';
       const defKey = isHomeDef ? 'homeTeam' : 'awayTeam';
+      const attKey = isHomeDef ? 'awayTeam' : 'homeTeam';
       const defTeam = cloneTeam(state[defKey]);
-      if (!defTeam) return {};
+      const attTeam = cloneTeam(state[attKey]);
+      if (!defTeam || !attTeam) return {};
 
       const fouler = defTeam.starters[foulerSlotIndex];
       if (!fouler || fouler.isSentOff) return {};
 
       defTeam.stats.fouls = (defTeam.stats.fouls || 0) + 1;
+      if (setPieceResult === 'PENALTY') {
+        attTeam.stats.penalties = (attTeam.stats.penalties || 0) + 1;
+      } else {
+        attTeam.stats.freeKicks = (attTeam.stats.freeKicks || 0) + 1;
+      }
+
       const newEvents = [];
       const foulerName = getSafeName(fouler, '수비수');
-      const tackleDesc = isFromBehind ? '위험한 뒤쪽 백태클(Back Tackle)' : '깊숙한 슬라이딩 태클';
+      const tackleDesc = isFromBehind ? '위험한 백태클' : '깊숙한 태클';
+      const spLabel = setPieceResult === 'PENALTY' ? '페널티킥이 선언됩니다!' : '반칙 지점에서 프리킥으로 재개됩니다.';
 
       if (cardSeverity === 'DIRECT_RED') {
         fouler.isSentOff = true;
@@ -656,7 +780,7 @@ export const useLiveMatchStore = create((set, get) => ({
             defTeam,
             fouler,
             null,
-            `🟥 [다이렉트 퇴장!] ${foulerName} 선수가 ${victimName || '상대 공격수'}에게 악의적인 ${tackleDesc}을 가해 주심이 지체 없이 레드카드를 꺼내듭니다!`
+            `🟥 [다이렉트 퇴장] ${foulerName} 선수가 ${victimName || '상대 공격수'}에게 ${tackleDesc} 반칙을 범해 퇴장당합니다. (${spLabel})`
           )
         );
       } else if (cardSeverity === 'YELLOW') {
@@ -672,7 +796,7 @@ export const useLiveMatchStore = create((set, get) => ({
               defTeam,
               fouler,
               null,
-              `🟨🟥 [경고 누적 퇴장!] ${foulerName} 선수가 거친 ${tackleDesc}로 두 번째 옐로카드를 받고 퇴장당합니다!`
+              `🟨🟥 [경고 누적 퇴장] ${foulerName} 선수가 ${tackleDesc} 반칙으로 두 번째 경고를 받고 퇴장당합니다. (${spLabel})`
             )
           );
         } else {
@@ -683,16 +807,19 @@ export const useLiveMatchStore = create((set, get) => ({
               defTeam,
               fouler,
               null,
-              `🟨 [경고] ${foulerName} 선수, 돌파하던 ${victimName || '상대 선수'}를 향한 ${tackleDesc} 반칙으로 옐로카드를 받습니다.`
+              `🟨 [경고] ${foulerName} 선수가 ${victimName || '상대 선수'}에게 ${tackleDesc} 반칙을 범해 옐로카드를 받습니다. (${spLabel})`
             )
           );
         }
       } else {
-        newEvents.push(makeInfoEvent(minute, `📢 [파울] ${defTeam.name} ${foulerName} 선수의 슬라이딩 태클 반칙이 선언됩니다.`));
+        newEvents.push(
+          makeInfoEvent(minute, `📢 [반칙] ${defTeam.name} ${foulerName} 선수의 파울. ${spLabel}`)
+        );
       }
 
       return {
         [defKey]: defTeam,
+        [attKey]: attTeam,
         timelineEvents: [...(state.timelineEvents || []), ...newEvents],
       };
     }),
@@ -732,7 +859,6 @@ export const useLiveMatchStore = create((set, get) => ({
             ...attTeam.stats,
             shots: (attTeam.stats?.shots || 0) + 1,
             shotsOnTarget: (attTeam.stats?.shotsOnTarget || 0) + (isOnTarget ? 1 : 0),
-            corners: (attTeam.stats?.corners || 0) + (isOnTarget && Math.random() < 0.35 ? 1 : 0),
           },
         },
         [defKey]: {
@@ -747,7 +873,15 @@ export const useLiveMatchStore = create((set, get) => ({
       };
     }),
 
-  recordActualCanvasGoal: ({ teamSide, shooterSlotIndex, scorerName, assisterSlotIndex, assisterName, goalStyle = 'NORMAL' }) =>
+  recordActualCanvasGoal: ({
+    teamSide,
+    shooterSlotIndex,
+    scorerName,
+    assisterSlotIndex,
+    assisterName,
+    goalStyle = 'NORMAL',
+    isGkMistake = false,
+  }) =>
     set((state) => {
       const minute = Math.max(1, state.minute || 1);
       const isHome = teamSide === 'HOME';
@@ -755,18 +889,24 @@ export const useLiveMatchStore = create((set, get) => ({
       const otherTeam = isHome ? state.awayTeam : state.homeTeam;
       const starters = activeTeam?.starters || [];
 
-      let realScorer =
+      const realScorer =
         starters.find((p, idx) => p && !p.isSentOff && (p.slotIndex === shooterSlotIndex || idx === shooterSlotIndex)) ||
         starters.find((p) => p && !p.isSentOff && (p.name === scorerName || p.safeName === scorerName)) ||
         starters.find((p) => p && !p.isSentOff && p.slotRoleCode !== 'GK') ||
         starters[0];
 
+      // 골키퍼는 어시스트 대상에서 제외하고 단독 돌파로 처리
       let realAssister = null;
-      if (assisterSlotIndex !== undefined || assisterName) {
-        realAssister =
-          starters.find((p, idx) => p && !p.isSentOff && p !== realScorer && (p.slotIndex === assisterSlotIndex || idx === assisterSlotIndex)) ||
+      if (!isGkMistake && (assisterSlotIndex !== null && assisterSlotIndex !== undefined || assisterName)) {
+        const candidate =
+          starters.find(
+            (p, idx) => p && !p.isSentOff && p !== realScorer && (p.slotIndex === assisterSlotIndex || idx === assisterSlotIndex)
+          ) ||
           starters.find((p) => p && !p.isSentOff && p !== realScorer && (p.name === assisterName || p.safeName === assisterName)) ||
           null;
+        if (candidate && candidate.slotRoleCode !== 'GK' && candidate.mainPosition !== 'GK') {
+          realAssister = candidate;
+        }
       }
 
       const realScorerId = realScorer?.userPlayerId ?? realScorer?.playerId ?? realScorer?.id ?? 1;
@@ -804,13 +944,19 @@ export const useLiveMatchStore = create((set, get) => ({
       const newAwayScore = !isHome ? (state.awayTeam.score || 0) + 1 : state.awayTeam.score || 0;
 
       const styleLabel =
-        goalStyle === 'CUT_INSIDE'
-          ? '인사이드 포워드 측면 컷인 감아차기 골!'
+        isGkMistake
+          ? '상대 키퍼 실책을 놓치지 않은 단독 돌파 득점'
+          : goalStyle === 'PENALTY'
+          ? '침착한 페널티킥 성공'
+          : goalStyle === 'FREE_KICK'
+          ? '예리한 직접 프리킥 득점'
+          : goalStyle === 'HEADER'
+          ? '높은 타점의 크로스 헤더 골'
+          : goalStyle === 'CUT_INSIDE'
+          ? '측면 컷인 감아차기 골'
           : goalStyle === 'LONG_SHOT'
-          ? '환상적인 중거리 대포알 원더골!'
-          : goalStyle === 'TIKI_TAKA'
-          ? '티키타카 패스 워크에 이은 마무리!'
-          : '날카로운 침투에 이은 마무리 슈팅 득점!';
+          ? '중거리 슈팅 득점'
+          : '침투 후 마무리 득점';
 
       const goalEvt = {
         eventId: `GOAL_${minute}_${Date.now()}`,
@@ -830,9 +976,10 @@ export const useLiveMatchStore = create((set, get) => ({
         assistDisplay: realAssisterName ? `🎯 어시스트: ${realAssisterName}` : `⚡ ${styleLabel}`,
         scoreHome: newHomeScore,
         scoreAway: newAwayScore,
+        isPenalty: goalStyle === 'PENALTY',
         description: realAssisterName
-          ? `⚽ [${minute}'] [${styleLabel}] ${realAssisterName}의 패스를 받은 ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 골망을 흔듭니다!`
-          : `⚽ [${minute}'] [${styleLabel}] ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 단독 돌파 후 득점합니다!`,
+          ? `⚽ [${minute}'] [${styleLabel}] ${realAssisterName}의 도움을 받은 ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 득점합니다.`
+          : `⚽ [${minute}'] [${styleLabel}] ${realScorerName}(${realScorer?.slotRoleCode || 'FW'}) 선수가 단독 돌파로 골망을 흔듭니다.`,
       };
 
       const updatedTeamStats = {
@@ -871,10 +1018,13 @@ export const useLiveMatchStore = create((set, get) => ({
     const awayTeam = buildFieldTeam({ side: 'AWAY', ...away });
     const weather = WEATHER_TYPES[Math.floor(Math.random() * WEATHER_TYPES.length)];
     const startMinute = scenario ? scenario.startMinute : 0;
+    const firstHalfAdded = 1 + Math.floor(Math.random() * 4); // 전반 추가시간 1~4분 랜덤
+    const secondHalfAdded = 2 + Math.floor(Math.random() * 4); // 후반 추가시간 2~5분 랜덤
+
     const logs = [
       makeInfoEvent(
         startMinute,
-        `🏟️ 킥오프! ${homeTeam.name}(평균 OVR ${homeTeam.avgOvr}) vs ${awayTeam.name}(평균 OVR ${awayTeam.avgOvr}) · 날씨: ${weather.label}`
+        `🏟️ 킥오프: ${homeTeam.name}(평균 OVR ${homeTeam.avgOvr}) vs ${awayTeam.name}(평균 OVR ${awayTeam.avgOvr}) · 날씨: ${weather.label}`
       ),
     ];
 
@@ -893,7 +1043,7 @@ export const useLiveMatchStore = create((set, get) => ({
       homeTeam.stats.shotsOnTarget = Math.max(scenario.scoreHome, 1);
       awayTeam.stats.shots = Math.max(scenario.scoreAway, 3);
       awayTeam.stats.shotsOnTarget = Math.max(scenario.scoreAway, 2);
-      logs.push(makeInfoEvent(startMinute, `[시나리오] ${scenario.title} · ${startMinute}분 · ${scenario.scoreHome}:${scenario.scoreAway} 상황에서 시작합니다.`));
+      logs.push(makeInfoEvent(startMinute, `[시나리오] ${scenario.title} · ${startMinute}분 · ${scenario.scoreHome}:${scenario.scoreAway} 상황에서 시작함`));
       if (scenario.homeRedCard) {
         const victim =
           homeTeam.starters.find((p) => p.slotRoleGroup === 'DF' && /CB/.test(p.slotRoleCode)) ||
@@ -901,7 +1051,7 @@ export const useLiveMatchStore = create((set, get) => ({
         if (victim) {
           victim.isSentOff = true;
           homeTeam.stats.redCards = 1;
-          logs.push(makeEvent(Math.max(1, startMinute - 6), 'RED_CARD', homeTeam, victim, null, `${victim.name} 선수가 레드카드로 퇴장당했습니다!`));
+          logs.push(makeEvent(Math.max(1, startMinute - 6), 'RED_CARD', homeTeam, victim, null, `${victim.name} 선수가 레드카드로 퇴장당한 상태임`));
         }
       }
     }
@@ -915,6 +1065,11 @@ export const useLiveMatchStore = create((set, get) => ({
       status: 'live',
       matchPhase,
       minute: startMinute,
+      firstHalfAdded,
+      secondHalfAdded,
+      addedTime: firstHalfAdded,
+      inStoppageTime: false,
+      stoppageElapsed: 0,
       weather,
       lastGoalMinute: -10,
       isPaused: isHalfTimeStart,
@@ -954,34 +1109,71 @@ export const useLiveMatchStore = create((set, get) => ({
     syncTicker();
   },
 
+  /**
+   * 전/후반 정규시간 종료 후 랜덤 추가시간(Stoppage Time)을 진행한 뒤 종료함
+   */
   advanceMinute: () => {
     const state = get();
     if (state.status !== 'live' || state.isPaused) return;
     if (state.matchPhase !== 'FIRST_HALF' && state.matchPhase !== 'SECOND_HALF') return;
 
-    const minute = state.minute + 1;
     const home = cloneTeam(state.homeTeam);
     const away = cloneTeam(state.awayTeam);
-    const { events, action } = simulateSingleMinuteTick(home, away, minute, state.weather);
-    const logs = [...state.timelineEvents, ...events];
+    const logs = [...state.timelineEvents];
     const seq = state.actionSeq + 1;
 
+    let nextMinute = state.minute;
+    let inStoppage = state.inStoppageTime;
+    let stoppageElapsed = state.stoppageElapsed;
+
+    if (state.matchPhase === 'FIRST_HALF') {
+      if (state.minute < MATCH_RULES.HALF_TIME_MINUTE) {
+        nextMinute = state.minute + 1;
+        if (nextMinute === MATCH_RULES.HALF_TIME_MINUTE) {
+          inStoppage = true;
+          stoppageElapsed = 0;
+          logs.push(makeInfoEvent(45, `⏱️ 전반전 정규시간 종료 · 추가시간 ${state.firstHalfAdded}분이 적용됩니다.`));
+        }
+      } else {
+        stoppageElapsed += 1;
+      }
+    } else if (state.matchPhase === 'SECOND_HALF') {
+      if (state.minute < MATCH_RULES.MATCH_MINUTES) {
+        nextMinute = state.minute + 1;
+        if (nextMinute === MATCH_RULES.MATCH_MINUTES) {
+          inStoppage = true;
+          stoppageElapsed = 0;
+          logs.push(makeInfoEvent(90, `⏱️ 후반전 정규시간 종료 · 추가시간 ${state.secondHalfAdded}분이 적용됩니다.`));
+        }
+      } else {
+        stoppageElapsed += 1;
+      }
+    }
+
+    const { events, action } = simulateSingleMinuteTick(home, away, nextMinute, state.weather);
+    logs.push(...events);
+
     const patch = {
-      minute,
+      minute: nextMinute,
+      inStoppageTime: inStoppage,
+      stoppageElapsed,
       homeTeam: home,
       awayTeam: away,
       actionSeq: seq,
       currentTickAction: { ...action, seq },
     };
 
-    if (minute === MATCH_RULES.HALF_TIME_MINUTE && state.matchPhase === 'FIRST_HALF') {
+    if (state.matchPhase === 'FIRST_HALF' && inStoppage && stoppageElapsed >= state.firstHalfAdded) {
       const homeRecovery = applyHalfTimeRecovery(home);
       applyHalfTimeRecovery(away);
       const totalTicks = Math.max(1, home.stats.possessionTicks + away.stats.possessionTicks);
       const homePossession = Math.round((home.stats.possessionTicks / totalTicks) * 100);
-      logs.push(makeInfoEvent(minute, `🔔 전반전 종료 (하프타임) · ${home.name} ${home.score} : ${away.score} ${away.name}`));
+      logs.push(makeInfoEvent(45, `🔔 전반전 종료 (45+${state.firstHalfAdded}') · ${home.name} ${home.score} : ${away.score} ${away.name}`));
       Object.assign(patch, {
         matchPhase: 'HALF_TIME',
+        inStoppageTime: false,
+        stoppageElapsed: 0,
+        addedTime: state.secondHalfAdded,
         isPaused: true,
         isHalfTimeModalOpen: true,
         halfTimeSummary: {
@@ -994,15 +1186,20 @@ export const useLiveMatchStore = create((set, get) => ({
       });
     }
 
-    if (minute >= MATCH_RULES.MATCH_MINUTES) {
-      logs.push(makeInfoEvent(minute, `🏁 경기 종료 휘슬! 최종 스코어 ${home.name} ${home.score} : ${away.score} ${away.name}`));
-      Object.assign(patch, { status: 'finished', matchPhase: 'FULL_TIME', isPaused: true });
+    if (state.matchPhase === 'SECOND_HALF' && inStoppage && stoppageElapsed >= state.secondHalfAdded) {
+      logs.push(makeInfoEvent(90, `🏁 경기 종료 휘슬 (90+${state.secondHalfAdded}') · 최종 스코어 ${home.name} ${home.score} : ${away.score} ${away.name}`));
+      Object.assign(patch, {
+        status: 'finished',
+        matchPhase: 'FULL_TIME',
+        inStoppageTime: false,
+        isPaused: true,
+      });
     }
 
     patch.timelineEvents = logs;
     set(patch);
     syncTicker();
-    if (minute >= MATCH_RULES.MATCH_MINUTES) get().submitResult();
+    if (patch.status === 'finished') get().submitResult();
   },
 
   pauseMatch: () => {
@@ -1028,28 +1225,67 @@ export const useLiveMatchStore = create((set, get) => ({
     syncTicker();
   },
 
+  /**
+   * 하프타임 라커룸 토크 선택 (후반 시작 전까지 다른 선택지로 언제든 변경 가능)
+   */
   selectLockerTalk: (type) => {
     const state = get();
-    if (state.matchPhase !== 'HALF_TIME') return { success: false, message: '하프타임에만 라커룸 토크를 할 수 있습니다.' };
-    if (state.lockerTalk) return { success: false, message: '라커룸 토크는 하프타임에 한 번만 할 수 있습니다.' };
+    if (state.matchPhase !== 'HALF_TIME') return { success: false, message: '하프타임에만 라커룸 토크를 선택할 수 있습니다.' };
     if (!LOCKER_TALKS[type]) return { success: false, message: '알 수 없는 라커룸 토크입니다.' };
+
     const team = cloneTeam(state.homeTeam);
     const away = state.awayTeam;
     const scoreDiff = team.score - away.score;
-    const poorPerformance = (team.stats?.shots || 0) <= (away.stats?.shots || 0) || scoreDiff <= 1;
+    const sternEffective = scoreDiff <= 1;
 
-    // [요구사항 12번 해결] 지고 있을 때뿐만 아니라 비기거나 경기력(슈팅 수)이 부진할 때, 혹은 1점 차 불안한 리드일 때도 질책(STERN) 효과 100% 발동!
-    const sternEffective = scoreDiff <= 0 || poorPerformance;
     team.talkEffect = getTalkEffect(type, sternEffective);
-    team.teamMorale = Math.min(100, (team.teamMorale || 75) + (sternEffective ? 14 : 8));
-    const note =
-      type === 'STERN' && sternEffective
-        ? ' (선수들의 정신력이 바짝 무장되어 후반전 공수 집중력이 상승합니다!)'
-        : '';
-    const description = `[라커룸 토크] 🗣️ ${LOCKER_TALKS[type].label}: ${LOCKER_TALKS[type].desc}${note}`;
+    team.teamMorale = Math.min(100, 78 + (sternEffective ? 12 : 8));
+    const description = `[라커룸 토크] 🗣️ ${LOCKER_TALKS[type].label} 선택: ${LOCKER_TALKS[type].desc}`;
+
+    // 기존 라커룸 토크 로그를 교체하거나 추가
+    const filteredLogs = state.timelineEvents.filter((e) => !String(e.description || '').startsWith('[라커룸 토크]'));
     set({
       homeTeam: team,
       lockerTalk: type,
+      timelineEvents: [...filteredLogs, makeEvent(state.minute, 'TACTIC_CHANGE', team, null, null, description, true)],
+    });
+    return { success: true, message: description };
+  },
+
+  /**
+   * 경기 중 터치라인 지시 (사기 및 경기력 실시간 상승)
+   */
+  issueTouchlineShout: (shoutKey) => {
+    const state = get();
+    if (state.status !== 'live') return { success: false, message: '경기 진행 중에만 터치라인 지시를 내릴 수 있습니다.' };
+    const shout = TOUCHLINE_SHOUTS[shoutKey];
+    if (!shout) return { success: false, message: '유효하지 않은 터치라인 지시입니다.' };
+    if (state.minute - (state.lastTouchlineShoutMinute ?? -10) < 5) {
+      return { success: false, message: '터치라인 지시는 5분 간격으로 사용할 수 있습니다.' };
+    }
+
+    const team = cloneTeam(state.homeTeam);
+    team.touchlineShout = shoutKey;
+    team.teamMorale = Math.min(100, (team.teamMorale || 75) + shout.moraleBoost);
+    team.talkEffect = {
+      ...team.talkEffect,
+      atkMul: (team.talkEffect?.atkMul || 1) * shout.atkMul,
+      defMul: (team.talkEffect?.defMul || 1) * shout.defMul,
+    };
+    team.starters = team.starters.map((p) =>
+      p && !p.isSentOff
+        ? {
+            ...p,
+            morale: Math.min(100, (p.morale || 75) + shout.moraleBoost),
+            liveRating: Math.min(10, Number(((p.liveRating ?? 6.0) + 0.1).toFixed(2))),
+          }
+        : p
+    );
+
+    const description = `[터치라인 지시] 📢 ${shout.label}: ${shout.desc}`;
+    set({
+      homeTeam: team,
+      lastTouchlineShoutMinute: state.minute,
       timelineEvents: [...state.timelineEvents, makeEvent(state.minute, 'TACTIC_CHANGE', team, null, null, description, true)],
     });
     return { success: true, message: description };
@@ -1062,6 +1298,8 @@ export const useLiveMatchStore = create((set, get) => ({
     const seq = state.actionSeq + 1;
     set({
       matchPhase: 'SECOND_HALF',
+      inStoppageTime: false,
+      stoppageElapsed: 0,
       isPaused: false,
       isHalfTimeModalOpen: false,
       actionSeq: seq,
@@ -1073,7 +1311,7 @@ export const useLiveMatchStore = create((set, get) => ({
         ballCarrierId: kickoffPlayer ? kickoffPlayer.id : null,
         passTargetId: null,
       },
-      timelineEvents: [...state.timelineEvents, makeInfoEvent(state.minute, '⚽ 후반전 킥오프! 양 팀 선수들이 그라운드로 돌아옵니다.')],
+      timelineEvents: [...state.timelineEvents, makeInfoEvent(state.minute, '⚽ 후반전 킥오프: 양 팀 선수들이 그라운드로 복귀합니다.')],
     });
     syncTicker();
   },
@@ -1083,7 +1321,7 @@ export const useLiveMatchStore = create((set, get) => ({
     if (state.status !== 'live') return { success: false, message: '진행 중인 경기가 아닙니다.' };
     const team = cloneTeam(state.homeTeam);
     if (team.subsLeft <= 0) {
-      return { success: false, message: '교체 카드를 모두 사용했습니다 (최대 3장).' };
+      return { success: false, message: `교체 카드를 모두 사용했습니다 (최대 ${MATCH_RULES.MAX_SUBSTITUTIONS}장).` };
     }
     const playerOut = team.starters[fieldSlotIndex];
     if (!playerOut) return { success: false, message: '교체 아웃할 슬롯을 찾을 수 없습니다.' };
@@ -1111,7 +1349,7 @@ export const useLiveMatchStore = create((set, get) => ({
     });
     return {
       success: true,
-      message: `🔄 선수 교체 완료: IN ${incoming.name}(${incoming.slotRoleCode}, 체력 ${incoming.currentStamina}%) / OUT ${outSnapshot.name} (남은 교체 ${team.subsLeft}장)`,
+      message: `🔄 선수 교체 완료: IN ${incoming.name}(${incoming.slotRoleCode}, 체력 ${Math.round(incoming.currentStamina)}%) / OUT ${outSnapshot.name} (남은 교체 ${team.subsLeft}장)`,
     };
   },
 

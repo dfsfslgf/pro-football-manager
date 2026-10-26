@@ -1,6 +1,8 @@
 import { effectiveStats, computeOverall, rarityFromWeight } from './playerMath.js';
 
-
+/**
+ * 보유 선수 행을 API 응답용 선수 DTO로 변환함
+ */
 export function toPlayerDto(p) {
   const secondaryList = String(p.secondaryRole || '')
     .split(',')
@@ -8,6 +10,9 @@ export function toPlayerDto(p) {
     .filter(Boolean);
 
   const roleCodes = [...new Set([p.preferredRole, ...secondaryList].filter(Boolean))];
+  const baseStats = p.baseStats || {};
+  const maxLevel = Number(p.maxLevel || baseStats.maxLevel || 20);
+  const suspendedMatches = Number(p.suspendedMatches ?? baseStats.suspendedMatches ?? 0);
 
   return {
     userPlayerId: p.userPlayerId,
@@ -18,11 +23,13 @@ export function toPlayerDto(p) {
     secondaryRoleCode: secondaryList.join(',') || null,
     roleCodes,
     level: p.level,
+    maxLevel,
+    suspendedMatches,
     exp: p.exp ?? 0,
     stamina: p.stamina,
-    baseStats: p.baseStats,
-    effectiveStats: effectiveStats(p.baseStats, p.level),
-    overall: computeOverall(p.baseStats, p.level, p.mainPosition),
+    baseStats,
+    effectiveStats: effectiveStats(baseStats, p.level),
+    overall: computeOverall(baseStats, p.level, p.mainPosition),
     rarity: rarityFromWeight(p.dropWeight ?? 100),
     tags: p.tags || [],
     instruction: p.instruction || null,

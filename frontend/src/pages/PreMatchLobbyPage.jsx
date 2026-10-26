@@ -34,7 +34,9 @@ function OpponentCard({ opponent }) {
         {TEAM_TACTIC_GROUPS.map((g) => (
           <li key={g.key} className="flex justify-between">
             <span className="text-slate-500">{g.label}</span>
-            <span className="font-semibold text-slate-200">{TEAM_TACTIC_LABELS[g.key][opponent.tactics[g.key]]}</span>
+            <span className="font-semibold text-slate-200">
+              {TEAM_TACTIC_LABELS[g.key]?.[opponent.tactics?.[g.key]] || '보통'}
+            </span>
           </li>
         ))}
       </ul>
@@ -65,15 +67,17 @@ export default function PreMatchLobbyPage() {
   const user = useAuthStore((s) => s.user);
   const params = useNavStore((s) => s.params);
   const loaded = useSquadStore((s) => s.loaded);
+  const starters = useSquadStore((s) => s.starters);
   const go = useNavStore((s) => s.go);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // 경기 전 로비 진입 시 항상 서버에서 최신 체력 및 징계 상태를 강제 동기화함
   useEffect(() => {
     if (!pending) {
       go('modes');
-    } else if (!useSquadStore.getState().loaded) {
-      useSquadStore.getState().loadSquad(false);
+    } else {
+      useSquadStore.getState().loadSquad(true);
     }
   }, [pending, go]);
 
@@ -82,7 +86,6 @@ export default function PreMatchLobbyPage() {
   const { opponent, scenario } = next;
   const meta = MODE_META[mode];
 
-  // 월드컵 모드일 경우 선택한 국가대표팀 이름/엠블럼 적용
   const wcNation = params?.nation || selectedWorldCupNation;
   const displayHomeName = mode === 'WORLD_CUP' && wcNation ? `${wcNation.name} 대표팀` : club.name;
   const displayHomeEmblem = mode === 'WORLD_CUP' && wcNation?.emblem ? wcNation.emblem : club.emblemIcon;
@@ -90,6 +93,17 @@ export default function PreMatchLobbyPage() {
   const handleKickOff = async () => {
     setBusy(true);
     setNotice(null);
+
+    const suspendedStarters = (starters || []).filter((p) => (p.suspendedMatches || 0) > 0);
+    if (suspendedStarters.length > 0) {
+      setNotice({
+        type: 'error',
+        text: `퇴장 징계로 출전 정지 중인 선수(${suspendedStarters.map((p) => `${p.name} [잔여 ${p.suspendedMatches}경기]`).join(', ')})가 선발에 포함되어 있습니다. 후보 선수로 교체해 주세요.`,
+      });
+      setBusy(false);
+      return;
+    }
+
     const saved = await useSquadStore.getState().saveSquad();
     if (!saved.success) {
       setNotice({ type: 'error', text: saved.message });
@@ -105,8 +119,8 @@ export default function PreMatchLobbyPage() {
         emblem: opponent.emblem,
         formation: opponent.formation,
         tactics: opponent.tactics,
-        starters: opponent.starters.map((p, i) => normalizePlayer({ ...p, stamina: 100 }, 'AWAY', i + 1)),
-        bench: opponent.bench.map((p, i) => normalizePlayer({ ...p, stamina: 100 }, 'AWAY', 12 + i)),
+        starters: opponent.starters.map((p, i) => normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', i + 1)),
+        bench: opponent.bench.map((p, i) => normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', 12 + i)),
       };
       useLiveMatchStore.getState().initMatch({
         home: {
@@ -155,7 +169,7 @@ export default function PreMatchLobbyPage() {
           </div>
         ) : (
           <p className="text-xs text-slate-400">
-            상대 팀의 포메이션과 주요 선수를 확인한 뒤 전술을 점검하고 킥오프를 눌러 경기장에 입장하세요.
+            상대 팀의 포메이션과 주요 선수를 확인한 뒤 전술과 선수 체력을 점검하고 킥오프를 눌러 경기장에 입장하세요.
           </p>
         )}
       </Panel>
@@ -164,7 +178,7 @@ export default function PreMatchLobbyPage() {
         <div className="xl:col-span-1">
           <OpponentCard opponent={opponent} />
         </div>
-        <Panel title="내 라인업 · 전술 점검" className="xl:col-span-3">
+        <Panel title="내 라인업 · 전술 점검 (실제 보유 체력 반영)" className="xl:col-span-3">
           {loaded ? (
             <TacticsWorkspace source="squad" />
           ) : (

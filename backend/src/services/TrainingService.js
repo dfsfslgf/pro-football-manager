@@ -13,15 +13,20 @@ const ROLE_OPTIONS = {
   FW: ['LW', 'RW', 'ST'],
 };
 
-let columnExpanded = false;
-async function ensureSecondaryRoleColumnWidth(conn) {
-  if (columnExpanded) return;
+let schemaChecked = false;
+async function ensureTrainingColumns(conn) {
+  if (schemaChecked) return;
   try {
     await conn.query('ALTER TABLE user_players MODIFY COLUMN secondary_role VARCHAR(64) DEFAULT NULL');
-    columnExpanded = true;
   } catch {
-    columnExpanded = true;
+    // ignore
   }
+  try {
+    await conn.query('ALTER TABLE user_players ADD COLUMN max_level INT NOT NULL DEFAULT 20');
+  } catch {
+    // ignore
+  }
+  schemaChecked = true;
 }
 
 async function withTransaction(fn) {
@@ -39,15 +44,97 @@ async function withTransaction(fn) {
   }
 }
 
+/**
+ * 한계돌파 단계별 성공 확률 계산 (단계가 올라갈수록 확률 감소)
+ */
+function getBreakthroughRate(currentMaxLevel) {
+  if (currentMaxLevel <= 20) return 0.70; // 1단계 돌파 (Lv.20 -> 25): 70%
+  if (currentMaxLevel <= 25) return 0.50; // 2단계 돌파 (Lv.25 -> 30): 50%
+  if (currentMaxLevel <= 30) return 0.35; // 3단계 돌파 (Lv.30 -> 35): 35%
+  return 0.20; // 4단계 이상 돌파: 20%
+}
+
 export default class TrainingService {
+  /**
+   * 일반 레벨업 특훈 및 중복 보유 선수를 활용한 한계돌파(+5 최대레벨 확장) 통합 처리
+   */
   static async levelUp(userId, userPlayerId) {
     return withTransaction(async (conn) => {
+      await ensureTrainingColumns(conn);
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
       const player = await ClubRepository.findPlayerForUpdate(conn, userId, userPlayerId);
       if (!player) throw new NotFoundError('선수를 찾을 수 없습니다.');
-      if (player.level >= TRAINING.MAX_LEVEL) throw new ValidationError(`최대 레벨(${TRAINING.MAX_LEVEL})입니다.`);
 
+      const [maxRows] = await conn.query('SELECT max_level AS maxLevel FROM user_players WHERE id = ? AND user_id = ?', [
+        userPlayerId,
+        userId,
+      ]);
+      const currentMaxLevel = Number(maxRows?.[0]?.maxLevel || TRAINING.MAX_LEVEL || 20);
+
+      // 현재 레벨이 최대 레벨에 도달한 경우: 중복 보유 선수를 이용한 한계돌파 시도
+      if (player.level >= currentMaxLevel) {
+        if (currentMaxLevel >= 40) {
+          throw new ValidationError('최종 한계돌파 레벨(Lv.40)에 도달했습니다.');
+        }
+
+        // 동일 마스터 ID(player_master_id)를 가진 비선발/비벤치 중복 선수 조회
+        const [dups] = await conn.query(
+          `SELECT id, level FROM user_players 
+           WHERE user_id = ? AND player_master_id = ? AND id != ? AND is_starter = 0 AND lineup_slot IS NULL 
+           ORDER BY level ASC LIMIT 1 FOR UPDATE`,
+          [userId, player.playerId, userPlayerId]
+        );
+
+        if (!dups || dups.length === 0) {
+          throw new ValidationError(
+            `현재 최대 레벨(Lv.${currentMaxLevel})입니다. 한계돌파(+5레벨 확장)를 하려면 스카우트 등으로 획득한 동일한 중복 선수(예비 명단 상태)가 필요합니다.`
+          );
+        }
+
+        const dupCardId = Number(dups[0].id);
+        const breakthroughCost = TRAINING.levelUpCost(player.level) * 2;
+        await WalletService.spendGold(conn, wallet, breakthroughCost, 'TRAINING_BREAKTHROUGH');
+
+        // 재료로 사용된 중복 선수 카드 소모
+        await ClubRepository.deletePlayer(conn, userId, dupCardId);
+
+        const btRate = player.bonusGauge >= 100 ? 1.0 : getBreakthroughRate(currentMaxLevel);
+        const btSuccess = Math.random() < btRate;
+        let nextLevel = player.level;
+        let nextMaxLevel = currentMaxLevel;
+        let nextGauge = player.bonusGauge;
+
+        if (btSuccess) {
+          nextMaxLevel = currentMaxLevel + 5;
+          nextLevel = player.level + 1;
+          nextGauge = 0;
+          await conn.query('UPDATE user_players SET level = ?, max_level = ?, bonus_gauge = 0 WHERE id = ? AND user_id = ?', [
+            nextLevel,
+            nextMaxLevel,
+            userPlayerId,
+            userId,
+          ]);
+        } else {
+          nextGauge = Math.min(100, player.bonusGauge + 25);
+          await ClubRepository.updatePlayerGauge(conn, userId, userPlayerId, nextGauge);
+        }
+
+        await trackDailyQuest(conn, userId, 'TRAIN_PLAYER', 1);
+        return {
+          success: btSuccess,
+          isBreakthrough: true,
+          level: nextLevel,
+          maxLevel: nextMaxLevel,
+          gauge: nextGauge,
+          cost: breakthroughCost,
+          rate: btRate,
+          overall: computeOverall(player.baseStats, nextLevel, player.mainPosition),
+          remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+        };
+      }
+
+      // 일반 레벨업 특훈
       const cost = TRAINING.levelUpCost(player.level);
       await WalletService.spendGold(conn, wallet, cost, 'TRAINING_LEVEL_UP');
 
@@ -66,7 +153,9 @@ export default class TrainingService {
       await trackDailyQuest(conn, userId, 'TRAIN_PLAYER', 1);
       return {
         success,
+        isBreakthrough: false,
         level,
+        maxLevel: currentMaxLevel,
         gauge,
         cost,
         rate: Math.round(rate * 1000) / 1000,
@@ -76,13 +165,9 @@ export default class TrainingService {
     });
   }
 
-  /**
-   * 포지션 숙련도 훈련 시 기존 포지션을 지우지 않고 쉼표 구분 문자열("LB,RB,CB")로 계속 추가하여
-   * 한 선수가 여러 개의 멀티 포지션을 습득할 수 있도록 지원
-   */
   static async trainPosition(userId, userPlayerId, roleCode) {
     return withTransaction(async (conn) => {
-      await ensureSecondaryRoleColumnWidth(conn);
+      await ensureTrainingColumns(conn);
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
       const player = await ClubRepository.findPlayerForUpdate(conn, userId, userPlayerId);

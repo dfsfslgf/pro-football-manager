@@ -5,7 +5,6 @@ import { MATCH_REWARDS, SPONSORS, TRAINING } from '../constants/clubRules.js';
 import { NotFoundError, ValidationError } from '../constants/errorCodes.js';
 import ClubRepository from '../repositories/ClubRepository.js';
 import MatchRepository from '../repositories/MatchRepository.js';
-import SquadRepository from '../repositories/SquadRepository.js';
 import WalletRepository from '../repositories/WalletRepository.js';
 import CompetitionService from './CompetitionService.js';
 import WalletService from './WalletService.js';
@@ -15,10 +14,7 @@ const ALLOWED_EVENT_TYPES = new Set(['GOAL', 'YELLOW_CARD', 'RED_CARD', 'SUBSTIT
 const TEAMS = new Set(['HOME', 'AWAY']);
 const MAX_EVENTS = 300;
 const MAX_GOALS = 20;
-const MAX_STAMINA_ENTRIES = 40;
-const STAT_LIMITS = { possession: 100, shots: 100, shotsOnTarget: 100, corners: 50, fouls: 100, yellowCards: 30, redCards: 11 };
 
-// 다각화된 확장 스폰서 폴백 테이블 (요구사항 18 반영)
 const EXTENDED_SPONSORS = {
   LOCAL_SHOP: { label: '동네 상점 연합', matchFee: 600, winBonus: 400 },
   REGIONAL_CORP: { label: '지역 기업 파트너십', matchFee: 950, winBonus: 750 },
@@ -29,12 +25,30 @@ const EXTENDED_SPONSORS = {
   SOVEREIGN_FUND: { label: '글로벌 국부펀드 메가 딜', matchFee: 3500, winBonus: 3500 },
 };
 
+let suspensionColChecked = false;
+async function ensurePlayerColumns(conn) {
+  if (suspensionColChecked) return;
+  try {
+    await conn.query('ALTER TABLE user_players ADD COLUMN suspended_matches INT NOT NULL DEFAULT 0');
+  } catch {
+    // 이미 존재하는 경우 무시
+  }
+  try {
+    await conn.query('ALTER TABLE user_players ADD COLUMN max_level INT NOT NULL DEFAULT 20');
+  } catch {
+    // 이미 존재하는 경우 무시
+  }
+  suspensionColChecked = true;
+}
+
 function isIntInRange(v, max) {
   return Number.isInteger(v) && v >= 0 && v <= max;
 }
 
-function isOptionalString(v, maxLen) {
-  return v === null || v === undefined || (typeof v === 'string' && v.length <= maxLen);
+function clampPossession(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 50;
+  return Math.max(15, Math.min(85, Math.round(n)));
 }
 
 export function sanitizeAndMapMatchEvents(timelineEvents, homeStarters = [], awayStarters = [], subHistory = []) {
@@ -56,23 +70,31 @@ export function sanitizeAndMapMatchEvents(timelineEvents, homeStarters = [], awa
       teamPool.find((p) => ['ST', 'LST', 'RST', 'LW', 'RW', 'CAM', 'FW'].includes(p.slotRoleCode || p.mainPosition)) ||
       teamPool[0] ||
       allParticipated[0];
-    const defaultAssister =
-      teamPool.find((p) => p !== defaultScorer && (p.slotRoleCode || p.mainPosition) !== 'GK') || null;
+
     const rawPid = evt.userPlayerId ?? evt.primaryPlayerId ?? evt.scorerId ?? evt.playerId;
     const rawPName = evt.primaryPlayerName ?? evt.scorerName ?? evt.playerName;
     const matchedPrimary =
       (rawPid !== undefined && idLookup.get(String(rawPid))) ||
       (rawPName && idLookup.get(String(rawPName).trim())) ||
       defaultScorer;
+
     const rawSid = evt.secondaryPlayerId ?? evt.assisterId;
     const rawSName = evt.secondaryPlayerName ?? evt.assisterName;
     let matchedSecondary =
       (rawSid !== undefined && idLookup.get(String(rawSid))) ||
       (rawSName && idLookup.get(String(rawSName).trim())) ||
       null;
-    if (matchedSecondary && matchedPrimary && matchedSecondary === matchedPrimary) {
-      matchedSecondary = defaultAssister;
+
+    // 골키퍼나 득점자 본인은 어시스트에서 제외함
+    if (
+      matchedSecondary &&
+      (matchedSecondary === matchedPrimary ||
+        matchedSecondary.mainPosition === 'GK' ||
+        matchedSecondary.slotRoleCode === 'GK')
+    ) {
+      matchedSecondary = null;
     }
+
     const validPrimaryId = matchedPrimary
       ? matchedPrimary.userPlayerId ?? matchedPrimary.playerId ?? matchedPrimary.id
       : 1;
@@ -85,6 +107,7 @@ export function sanitizeAndMapMatchEvents(timelineEvents, homeStarters = [], awa
     const validSecondaryName = matchedSecondary
       ? matchedSecondary.name || matchedSecondary.safeName || null
       : null;
+
     return {
       ...evt,
       userPlayerId: validPrimaryId,
@@ -121,87 +144,69 @@ export default class LiveMatchEngine {
     if (typeof tactics !== 'object') throw new ValidationError('팀 전술 형식이 올바르지 않습니다.');
     const normalized = {};
     for (const [key, allowed] of Object.entries(GAME_RULES.TEAM_TACTIC_OPTIONS)) {
-      if (!allowed.includes(tactics[key])) throw new ValidationError(`팀 전술 ${key} 값이 올바르지 않습니다.`);
-      normalized[key] = tactics[key];
+      const val = tactics[key] ?? (key === 'offsideTrap' ? 'OFF' : allowed[0]);
+      if (!allowed.includes(val)) throw new ValidationError(`팀 전술 ${key} 값이 올바르지 않습니다.`);
+      normalized[key] = val;
     }
     return normalized;
   }
 
-  static minStaminaDrainPerMinute() {
-    const positions = GAME_RULES.POSITION_STAMINA_DRAIN_MULTIPLIER;
-    const minInstruction = Math.min(...Object.values(GAME_RULES.INSTRUCTION_STAMINA_MULTIPLIER));
-    const minTeam =
-      Math.min(...Object.values(GAME_RULES.TEAM_TACTIC_STAMINA_MULTIPLIER.tempo)) *
-      Math.min(...Object.values(GAME_RULES.TEAM_TACTIC_STAMINA_MULTIPLIER.pressing));
-    const outfieldMin = Math.min(...Object.entries(positions).filter(([code]) => code !== 'GK').map(([, mult]) => mult));
-    return GAME_RULES.BASE_TICK_DRAIN_MIN * Math.min(positions.GK * minInstruction, outfieldMin * minTeam * minInstruction);
-  }
-
-  static maxStaminaAfter(startStamina, minutesPlayed) {
-    const recovery = minutesPlayed > GAME_RULES.HALF_TIME_MINUTE ? GAME_RULES.HALF_TIME_RECOVERY.MAX : 0;
-    const drained = startStamina - minutesPlayed * LiveMatchEngine.minStaminaDrainPerMinute() + recovery;
-    return Math.min(100, Math.max(GAME_RULES.MIN_STAMINA, drained));
-  }
-
   static validateResult(payload, baseline) {
-const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamina } = payload || {};
-    if (!isIntInRange(scoreHome, MAX_GOALS) || !isIntInRange(scoreAway, MAX_GOALS)) throw new ValidationError('스코어가 올바르지 않습니다.');
-    if (scoreHome < baseline.home || scoreAway < baseline.away) throw new ValidationError('스코어가 시작 스코어보다 낮습니다.');
+    const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamina } = payload || {};
+    if (!isIntInRange(scoreHome, MAX_GOALS) || !isIntInRange(scoreAway, MAX_GOALS)) {
+      throw new ValidationError('스코어가 올바르지 않습니다.');
+    }
+    if (scoreHome < baseline.home || scoreAway < baseline.away) {
+      throw new ValidationError('스코어가 시작 스코어보다 낮습니다.');
+    }
     const playedHome = scoreHome - baseline.home;
     const playedAway = scoreAway - baseline.away;
 
     const normalizeStats = (stats, minGoals = 0) => {
       const safeStats = stats || {};
-      const out = {};
-      
-      // 통계 필드들 강제 기본값 방어 (null/undefined 차단)
-      out.possession = Number.isInteger(safeStats.possession) ? safeStats.possession : 50;
-      out.shots = Math.max(minGoals, Number.isInteger(safeStats.shots) ? safeStats.shots : minGoals);
-      out.shotsOnTarget = Math.max(minGoals, Number.isInteger(safeStats.shotsOnTarget) ? safeStats.shotsOnTarget : minGoals);
-      out.corners = Number.isInteger(safeStats.corners) ? safeStats.corners : 0;
-      out.fouls = Number.isInteger(safeStats.fouls) ? safeStats.fouls : 0;
-      out.yellowCards = Number.isInteger(safeStats.yellowCards) ? safeStats.yellowCards : 0;
-      out.redCards = Number.isInteger(safeStats.redCards) ? safeStats.redCards : 0;
-      out.passesAttempted = Number.isInteger(safeStats.passesAttempted) ? safeStats.passesAttempted : 0;
-      out.passesCompleted = Number.isInteger(safeStats.passesCompleted) ? safeStats.passesCompleted : 0;
-      out.passAccuracy = Number.isInteger(safeStats.passAccuracy) ? safeStats.passAccuracy : 85;
-      out.tackles = Number.isInteger(safeStats.tackles) ? safeStats.tackles : 0;
-      out.saves = Number.isInteger(safeStats.saves) ? safeStats.saves : 0;
-
-      // 무결성 최종 보정
+      const out = {
+        possession: Number.isInteger(safeStats.possession) ? safeStats.possession : 50,
+        shots: Math.max(minGoals, Number.isInteger(safeStats.shots) ? safeStats.shots : minGoals),
+        shotsOnTarget: Math.max(minGoals, Number.isInteger(safeStats.shotsOnTarget) ? safeStats.shotsOnTarget : minGoals),
+        corners: Number.isInteger(safeStats.corners) ? safeStats.corners : 0,
+        fouls: Number.isInteger(safeStats.fouls) ? safeStats.fouls : 0,
+        yellowCards: Number.isInteger(safeStats.yellowCards) ? safeStats.yellowCards : 0,
+        redCards: Number.isInteger(safeStats.redCards) ? safeStats.redCards : 0,
+        passesAttempted: Number.isInteger(safeStats.passesAttempted) ? safeStats.passesAttempted : 0,
+        passesCompleted: Number.isInteger(safeStats.passesCompleted) ? safeStats.passesCompleted : 0,
+        passAccuracy: Number.isInteger(safeStats.passAccuracy) ? safeStats.passAccuracy : 85,
+        tackles: Number.isInteger(safeStats.tackles) ? safeStats.tackles : 0,
+        saves: Number.isInteger(safeStats.saves) ? safeStats.saves : 0,
+      };
       if (out.shotsOnTarget > out.shots) out.shots = out.shotsOnTarget;
       return out;
     };
 
     const home = normalizeStats(homeStats, playedHome);
     const away = normalizeStats(awayStats, playedAway);
-    
+
     if (home.possession + away.possession !== 100) {
       home.possession = clampPossession(home.possession);
       away.possession = 100 - home.possession;
     }
 
-    if (!Array.isArray(timelineEvents) || timelineEvents.length > MAX_EVENTS) throw new ValidationError('타임라인 이벤트가 올바르지 않습니다.');
-    const counts = { HOME: { goals: 0, reds: 0, subs: 0 }, AWAY: { goals: 0, reds: 0, subs: 0 } };
+    if (!Array.isArray(timelineEvents) || timelineEvents.length > MAX_EVENTS) {
+      throw new ValidationError('타임라인 이벤트가 올바르지 않습니다.');
+    }
     const events = timelineEvents
       .filter((e) => e && ALLOWED_EVENT_TYPES.has(e.type) && TEAMS.has(e.team))
-      .map((e) => {
-        if (e.type === 'GOAL') counts[e.team].goals++;
-        if (e.type === 'RED_CARD') counts[e.team].reds++;
-        if (e.type === 'SUBSTITUTION') counts[e.team].subs++;
-        return {
-          minute: Math.max(1, Math.min(GAME_RULES.MATCH_MINUTES, Number(e.minute) || 1)),
-          type: e.type,
-          team: e.team,
-          primaryPlayerId: e.primaryPlayerId ?? null,
-          primaryPlayerName: e.primaryPlayerName ?? null,
-          secondaryPlayerId: e.secondaryPlayerId ?? null,
-          secondaryPlayerName: e.secondaryPlayerName ?? null,
-          description: String(e.description || '').slice(0, 300),
-          isUserAction: e.isUserAction === true,
-          isPenalty: e.isPenalty === true,
-        };
-      });
+      .map((e) => ({
+        minute: Math.max(1, Math.min(95, Number(e.minute) || 1)),
+        type: e.type,
+        team: e.team,
+        primaryPlayerId: e.primaryPlayerId ?? null,
+        primaryPlayerName: e.primaryPlayerName ?? null,
+        secondaryPlayerId: e.secondaryPlayerId ?? null,
+        secondaryPlayerName: e.secondaryPlayerName ?? null,
+        description: String(e.description || '').slice(0, 300),
+        isUserAction: e.isUserAction === true,
+        isPenalty: e.isPenalty === true,
+      }));
 
     const staminaList = Array.isArray(playerStamina) ? playerStamina : [];
     const seen = new Set();
@@ -220,6 +225,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
         saves: Math.max(0, Math.min(60, Number(entry.saves) || 0)),
         shots: sh,
         shotsOnTarget: sot,
+        liveRating: Number.isFinite(Number(entry.liveRating)) ? Number(entry.liveRating) : null,
       });
     }
 
@@ -229,11 +235,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       if (e.team !== 'HOME') continue;
       if (['GOAL', 'YELLOW_CARD', 'RED_CARD'].includes(e.type)) {
         const numPid = Number(e.primaryPlayerId);
-        if (!numPid || !entryIds.has(numPid)) {
-          e.primaryPlayerId = fallbackId;
-        } else {
-          e.primaryPlayerId = numPid;
-        }
+        e.primaryPlayerId = numPid && entryIds.has(numPid) ? numPid : fallbackId;
       }
       if (e.secondaryPlayerId !== null && e.secondaryPlayerId !== undefined) {
         const numSid = Number(e.secondaryPlayerId);
@@ -241,9 +243,10 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       }
     }
 
-    // 선수별 득점 수와 개인 유효슈팅/슈팅 수 및 팀 전체 슈팅 통계 동기화 
     for (const entry of entries) {
-      const playerGoals = events.filter((e) => e.team === 'HOME' && e.type === 'GOAL' && e.primaryPlayerId === entry.userPlayerId).length;
+      const playerGoals = events.filter(
+        (e) => e.team === 'HOME' && e.type === 'GOAL' && e.primaryPlayerId === entry.userPlayerId
+      ).length;
       if (entry.shotsOnTarget < playerGoals) entry.shotsOnTarget = playerGoals;
       if (entry.shots < entry.shotsOnTarget) entry.shots = entry.shotsOnTarget;
     }
@@ -259,19 +262,11 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       scoreAway,
       homeStats: {
         ...home,
-        passesAttempted: homeStats?.passesAttempted || 0,
-        passesCompleted: homeStats?.passesCompleted || 0,
-        passAccuracy: homeStats?.passAccuracy || 85,
-        tackles: homeStats?.tackles || 0,
         tactics,
         lockerTalk: payload.lockerTalk ?? null,
       },
       awayStats: {
         ...away,
-        passesAttempted: awayStats?.passesAttempted || 0,
-        passesCompleted: awayStats?.passesCompleted || 0,
-        passAccuracy: awayStats?.passAccuracy || 82,
-        tackles: awayStats?.tackles || 0,
       },
       timelineEvents: events,
       entries,
@@ -285,37 +280,37 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       .filter((e) => e.minutesPlayed > 0 && positions.has(e.userPlayerId))
       .map((entry) => {
         const info = positions.get(entry.userPlayerId);
-        const goals = count('GOAL', 'primaryPlayerId', entry.userPlayerId);
-        const assists = count('GOAL', 'secondaryPlayerId', entry.userPlayerId);
-        const yellow = count('YELLOW_CARD', 'primaryPlayerId', entry.userPlayerId);
-        const red = count('RED_CARD', 'primaryPlayerId', entry.userPlayerId);
         const isGK = info.mainPosition === 'GK';
         const isDF = info.mainPosition === 'DF';
         const isMF = info.mainPosition === 'MF';
+        const goals = count('GOAL', 'primaryPlayerId', entry.userPlayerId);
+        // 골키퍼는 어시스트 집계에서 제외
+        const assists = isGK ? 0 : count('GOAL', 'secondaryPlayerId', entry.userPlayerId);
+        const yellow = count('YELLOW_CARD', 'primaryPlayerId', entry.userPlayerId);
+        const red = count('RED_CARD', 'primaryPlayerId', entry.userPlayerId);
         const cleanSheet = validated.scoreAway === 0 && (isGK || isDF) && entry.minutesPlayed >= 45 ? 1 : 0;
         const conceded = isGK && entry.minutesPlayed >= 45 ? validated.scoreAway : 0;
-
-        // DB에 저장되는 shotsOnTarget은 무조건 이번 경기 goals 이상
         const validShotsOnTarget = Math.max(goals, entry.shotsOnTarget || 0);
 
-        // 포지션별 활약도(수비 무실점, 미드필더 중원 장악, 골키퍼 선방, 공격수 슈팅 효율)에 따른 정밀 평점 산출
         let posBonus = 0;
-        if (isMF && entry.minutesPlayed >= 60) posBonus += (validated.homeStats?.possession >= 52 ? 0.45 : 0.2);
+        if (isMF && entry.minutesPlayed >= 60) posBonus += validated.homeStats?.possession >= 52 ? 0.45 : 0.2;
         if (isDF && validated.scoreAway <= 1) posBonus += 0.35;
-        if (!isGK && validShotsOnTarget >= 2 && goals === 0) posBonus += 0.2;
 
-        const raw =
-          6.5 +
-          goals * 1.4 +
-          assists * 1.0 +
-          cleanSheet * 1.1 +
+        const computedRaw =
+          6.2 +
+          goals * 1.2 +
+          assists * 0.8 +
+          cleanSheet * 0.9 +
           posBonus +
-          Math.min(1.6, entry.saves * 0.22) -
+          Math.min(1.5, entry.saves * 0.25) -
           yellow * 0.35 -
-          red * 1.6 +
-          (outcome === 'WIN' ? 0.35 : outcome === 'LOSE' ? -0.25 : 0);
+          red * 1.5 +
+          (outcome === 'WIN' ? 0.3 : outcome === 'LOSE' ? -0.2 : 0);
 
-        const rating = Math.round(Math.min(10, Math.max(3.5, raw)) * 10) / 10;
+        // 경기장 실시간 평점(liveRating)이 전달된 경우 이를 최우선으로 반영함
+        const finalRating = entry.liveRating !== null ? entry.liveRating : computedRaw;
+        const rating = Math.round(Math.min(10, Math.max(3.0, finalRating)) * 10) / 10;
+
         const exp =
           MATCH_REWARDS.expAppearance +
           goals * MATCH_REWARDS.expGoal +
@@ -352,14 +347,22 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
   static async finishMatch(userId, payload) {
     const sessionId = payload?.sessionId;
     const session = typeof sessionId === 'string' ? LiveMatchEngine.sessions.get(sessionId) : undefined;
-    if (!session || session.userId !== userId) throw new NotFoundError('유효한 경기 세션이 없습니다. 경기를 새로 시작해주세요.');
+    if (!session || session.userId !== userId) {
+      throw new NotFoundError('유효한 경기 세션이 없습니다. 경기를 새로 시작해주세요.');
+    }
     const { context } = session;
     const validated = LiveMatchEngine.validateResult(payload, context.baseline);
-    const outcome = validated.scoreHome > validated.scoreAway ? 'WIN' : validated.scoreHome === validated.scoreAway ? 'DRAW' : 'LOSE';
+    const outcome =
+      validated.scoreHome > validated.scoreAway
+        ? 'WIN'
+        : validated.scoreHome === validated.scoreAway
+        ? 'DRAW'
+        : 'LOSE';
     LiveMatchEngine.sessions.delete(sessionId);
 
     const conn = await pool.getConnection();
     try {
+      await ensurePlayerColumns(conn);
       await conn.beginTransaction();
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('유저 지갑 정보를 찾을 수 없습니다.');
@@ -371,9 +374,14 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       const sponsor = SPONSORS[club.sponsorKey] || EXTENDED_SPONSORS[club.sponsorKey] || SPONSORS.BASIC;
       const matchGold = MATCH_REWARDS.gold[outcome];
       const sponsorGold = sponsor.matchFee + (outcome === 'WIN' ? sponsor.winBonus : 0);
-      const competition = await CompetitionService.applyResult(conn, userId, context, validated.scoreHome, validated.scoreAway);
+      const competition = await CompetitionService.applyResult(
+        conn,
+        userId,
+        context,
+        validated.scoreHome,
+        validated.scoreAway
+      );
 
-      // 리그/컵/월드컵 우승 달성 시 특별 챔피언 보너스(골드 + 캐시) 추가 지급
       const isChampion = Boolean(competition.summary?.champion || competition.summary?.seasonEnd?.champion);
       const championBonusGold = isChampion ? 15000 : 0;
       const championBonusCash = isChampion ? 300 : 0;
@@ -394,7 +402,14 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
         },
       };
 
-      // 경기에 출전한 선수들의 기록 및 소모된 체력을 먼저 반영
+      // 1. 기존 출전 정지 선수의 징계 경기를 1경기 차감함
+      await conn
+        .query('UPDATE user_players SET suspended_matches = GREATEST(0, suspended_matches - 1) WHERE user_id = ? AND suspended_matches > 0', [
+          userId,
+        ])
+        .catch(() => {});
+
+      // 2. 이번 경기 출전 선수들의 기록, 소모된 체력, 신규 퇴장 징계(1~2경기)를 반영함
       for (const p of players) {
         await ClubRepository.applyMatchStats(conn, userId, {
           userPlayerId: p.userPlayerId,
@@ -412,19 +427,21 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
           gauge: Math.floor(p.exp / 10),
           stamina: p.stamina,
         });
+
+        if (p.red > 0) {
+          const banGames = Math.random() < 0.5 ? 1 : 2;
+          await conn
+            .query('UPDATE user_players SET suspended_matches = ? WHERE id = ? AND user_id = ?', [
+              banGames,
+              p.userPlayerId,
+              userId,
+            ])
+            .catch(() => {});
+        }
       }
 
-      // 전체 선수 기본 휴식 회복 + 경기에 출전하지 않은 벤치/예비 선수 추가 체력 회복(+40%, 최대 100)
-      await ClubRepository.restAllPlayers(conn, userId, TRAINING.REST_RECOVERY_RATIO);
-      if (ids.length > 0) {
-        const placeholders = ids.map(() => '?').join(',');
-        await conn.query(
-          `UPDATE user_players 
-           SET stamina = LEAST(100, stamina + 40) 
-           WHERE user_id = ? AND id NOT IN (${placeholders}) AND stamina < 100`,
-          [userId, ...ids]
-        ).catch(() => {});
-      }
+      // 3. 경기에 출전하지 않은 모든 후보 및 예비 선수의 체력을 회복함 (+45, 최대 100)
+      await ClubRepository.restAllPlayers(conn, userId, TRAINING.REST_RECOVERY_RATIO, ids);
 
       const report = {
         outcome,
@@ -460,7 +477,11 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       await trackDailyQuest(conn, userId, 'SCORE_GOALS', Math.max(0, validated.scoreHome - context.baseline.home));
 
       await conn.commit();
-      return { matchId, ...report, remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold } };
+      return {
+        matchId,
+        ...report,
+        remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
+      };
     } catch (err) {
       LiveMatchEngine.sessions.set(sessionId, session);
       await conn.rollback().catch((rollbackErr) => console.error('[LiveMatchEngine] rollback 실패:', rollbackErr));
@@ -469,10 +490,4 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       conn.release();
     }
   }
-}
-
-function clampPossession(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 50;
-  return Math.max(15, Math.min(85, Math.round(n)));
 }

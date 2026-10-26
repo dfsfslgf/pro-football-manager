@@ -407,22 +407,41 @@ const leagueHandler = {
     const division = prev?.nextDivision ?? LEAGUE.START_DIVISION;
     const prevTitles = prev?.titlesWon || 0;
     const tierLevel = prev?.finalRank === 1 ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
-    const difficultyBoost = (tierLevel - 1) * 2;
+    // 난이도 단계(tierLevel)에 비례해 상대 구단 능력치(+3씩) 상승
+    const difficultyBoost = (tierLevel - 1) * 3;
     const rng = createRng(`league:${userId}:${season}:${division}`);
 
     const leagueCfg = detectLeagueConfigForClub(club.name, division);
     const totalTeams = leagueCfg.teamCount;
-    const otherClubs = leagueCfg.clubs.filter(
-      (c) => !String(club.name).includes(c.name) && !c.name.includes(String(club.name))
+
+    // 이전 시즌 강등된 팀을 제외하고 2부에서 승격한 팀을 합류시킴
+    const relegatedSet = new Set(prev?.relegatedClubNames || []);
+    const promotedList = Array.isArray(prev?.promotedClubNames) ? prev.promotedClubNames : [];
+
+    let poolClubs = leagueCfg.clubs.filter(
+      (c) =>
+        !String(club.name).includes(c.name) &&
+        !c.name.includes(String(club.name)) &&
+        !relegatedSet.has(c.name)
     );
 
-    const pickedAiClubs = rng.shuffle(otherClubs).slice(0, totalTeams - 1);
+    const promotedObjects = promotedList
+      .filter((pName) => !poolClubs.some((c) => c.name === pName))
+      .map((pName) => ({
+        name: pName,
+        emblem: emblemFor(pName),
+        strength: division === 1 ? 78 : 74,
+      }));
+
+    poolClubs = [...promotedObjects, ...rng.shuffle(poolClubs)];
+    const pickedAiClubs = poolClubs.slice(0, totalTeams - 1);
+
     while (pickedAiClubs.length < totalTeams - 1) {
       const fallbackName = AI_CLUB_NAMES.LEAGUE[pickedAiClubs.length % AI_CLUB_NAMES.LEAGUE.length];
       pickedAiClubs.push({
         name: `${fallbackName} FC`,
         emblem: emblemFor(fallbackName),
-        strength: (LEAGUE.STRENGTH_BASE[division] || 78) + rng.int(-4, 4),
+        strength: (LEAGUE.STRENGTH_BASE[division] || 78) + rng.int(-3, 3),
       });
     }
 
@@ -435,7 +454,7 @@ const leagueHandler = {
         id,
         name: c.name,
         emblem: c.emblem || emblemFor(c.name),
-        strength: clamp(c.strength + difficultyBoost + rng.int(-2, 2), 55, 96),
+        strength: clamp(c.strength + difficultyBoost + rng.int(-1, 2), 55, 97),
       };
     });
 
@@ -470,6 +489,8 @@ const leagueHandler = {
       table: Object.fromEntries(ids.map((id) => [id, newRow(teams[id])])),
       lastRound: null,
       nextDivision: division,
+      relegatedClubNames: [],
+      promotedClubNames: [],
     };
   },
 
@@ -524,11 +545,11 @@ const leagueHandler = {
       const rank = me.rank;
       const baseReward =
         rank === 1
-          ? { gold: 20000, cashFree: 350 }
+          ? { gold: 25000, cashFree: 350 }
           : rank === 2
-          ? { gold: 12000, cashFree: 200 }
+          ? { gold: 14000, cashFree: 200 }
           : rank <= 4
-          ? { gold: 8000, cashFree: 120 }
+          ? { gold: 9000, cashFree: 120 }
           : rank <= 6
           ? { gold: 5000, cashFree: 70 }
           : { gold: 2500, cashFree: 30 };
@@ -537,22 +558,36 @@ const leagueHandler = {
       if (rank === 1) state.titlesWon = (state.titlesWon || 0) + 1;
 
       const totalTeams = Object.keys(state.teams).length;
-      const isBundes = state.leagueCode === 'BUNDES_1' || totalTeams === 18 || totalTeams <= 14;
-      const relegateCount = isBundes ? 2 : 3;
+      const isSmallLeague = state.leagueCode === 'BUNDES_1' || totalTeams <= 18;
+      const relegateCount = isSmallLeague ? 2 : 3;
       const relegateThreshold = totalTeams - relegateCount + 1;
 
+      // 강등된 구단과 2부에서 승격할 구단을 계산하여 다음 시즌 로스터에 반영함
+      const relegatedRows = standings.slice(-relegateCount).filter((r) => r.id !== 'USER');
+      state.relegatedClubNames = relegatedRows.map((r) => r.name);
+
+      const secondDivPool =
+        state.leagueCode === 'KLEAGUE_1' ? REAL_LEAGUE_CONFIGS.KLEAGUE_2.clubs : REAL_LEAGUE_CONFIGS.EFL_2.clubs;
+      state.promotedClubNames = rng
+        .shuffle(secondDivPool)
+        .slice(0, relegateCount)
+        .map((c) => c.name);
+
       state.nextDivision =
-        state.division > 1 && rank <= 2
+        state.division > 1 && rank <= 3
           ? Math.max(1, state.division - 1)
           : state.division === 1 && rank >= relegateThreshold
           ? 2
           : state.division;
+
       summary.seasonEnd = {
         rank,
         champion: rank === 1,
         promoted: state.nextDivision < state.division,
         relegated: state.nextDivision > state.division,
         nextDivision: state.nextDivision,
+        relegatedTeams: state.relegatedClubNames,
+        promotedTeams: state.promotedClubNames,
       };
     }
     return { state, summary, reward, finished };
@@ -722,11 +757,15 @@ const worldCupHandler = {
   create({ userId, club, prev }) {
     const tierLevel = prev?.champion === 'USER' ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
     const titlesWon = (prev?.titlesWon || 0) + (prev?.champion === 'USER' ? 1 : 0);
-    const difficultyBoost = (tierLevel - 1) * 2;
-    const rng = createRng(`wc:${userId}:${Math.floor(Date.now() / 4096)}`);
-    const names = rng.shuffle(AI_CLUB_NAMES.WORLD_CUP);
-    const teams = { USER: { id: 'USER', name: `${club.name} (국가대표)`, emblem: club.emblemIcon, strength: null } };
-    names.forEach((name, i) => {
+    const difficultyBoost = (tierLevel - 1) * 3;
+    const rng = createRng(`wc48:${userId}:${Math.floor(Date.now() / 4096)}`);
+
+    // 48개국 구성 (유저 팀 1개 + AI 47개국)
+    const allNations = rng.shuffle(AI_CLUB_NAMES.WORLD_CUP).slice(0, 47);
+    const teams = {
+      USER: { id: 'USER', name: `${club.name}`, emblem: club.emblemIcon, strength: null },
+    };
+    allNations.forEach((name, i) => {
       const id = `T${i + 1}`;
       teams[id] = {
         id,
@@ -735,11 +774,14 @@ const worldCupHandler = {
         strength: clamp(rng.int(WORLD_CUP.STRENGTH_RANGE[0], WORLD_CUP.STRENGTH_RANGE[1]) + difficultyBoost, 70, 97),
       };
     });
+
     const aiIds = rng.shuffle(Object.keys(teams).filter((id) => id !== 'USER'));
     const groups = {};
+    // 12개 조(A~L)에 4개국씩 총 48개국 배정
     WORLD_CUP.GROUPS.forEach((g, gi) => {
       groups[g] = gi === 0 ? ['USER', ...aiIds.slice(0, 3)] : aiIds.slice(3 + (gi - 1) * 4, 3 + gi * 4);
     });
+
     return {
       tierLevel,
       titlesWon,
@@ -748,7 +790,7 @@ const worldCupHandler = {
       table: Object.fromEntries(Object.keys(teams).map((id) => [id, newRow(teams[id])])),
       phase: 'GROUP',
       matchday: 1,
-      roundNames: WORLD_CUP.KNOCKOUT_NAMES,
+      roundNames: WORLD_CUP.KNOCKOUT_NAMES, // ['32강', '16강', '8강', '4강', '결승']
       rounds: [],
       roundIndex: 0,
       eliminatedAt: null,
@@ -757,14 +799,14 @@ const worldCupHandler = {
   },
 
   next(userId, state) {
-    if (state.phase === 'KNOCKOUT') return knockoutNext(userId, state, 'WK', '월드컵');
+    if (state.phase === 'KNOCKOUT') return knockoutNext(userId, state, 'WK', '2026 월드컵');
     const oppId = state.groups.A[state.matchday];
     const opp = state.teams[oppId];
     const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
     return {
       ref: `WG:${state.matchday}`,
-      label: `월드컵${tierNote} 조별리그 ${state.matchday}차전`,
-      opponentSpec: { seed: `wg:${userId}:${state.matchday}`, name: opp.name, strength: opp.strength },
+      label: `2026 월드컵 (48개국)${tierNote} 조별리그 ${state.matchday}차전`,
+      opponentSpec: { seed: `wg:${userId}:${state.matchday}`, name: opp.name, strength: opp.strength, isNationalTeam: true },
     };
   },
 
@@ -784,9 +826,9 @@ const worldCupHandler = {
         rounds: state.rounds,
       };
       const baseKoReward = r.champion
-        ? { gold: 35000, cashFree: 500 }
+        ? { gold: 50000, cashFree: 500 }
         : r.userWon
-        ? WORLD_CUP.KNOCKOUT_REWARD[before] || { gold: 6000, cashFree: 80 }
+        ? WORLD_CUP.KNOCKOUT_REWARD[before] || { gold: 7000, cashFree: 60 }
         : WORLD_CUP.ELIMINATED_REWARD;
       return {
         state,
@@ -828,25 +870,30 @@ const worldCupHandler = {
     };
     if (md < 3) return { state, summary, reward: { gold: 0, cashFree: 0 }, finished: false };
 
-    const advancers = Object.fromEntries(WORLD_CUP.GROUPS.map((g) => [g, groupStandings[g].slice(0, 2).map((r) => r.id)]));
-    summary.advanced = advancers.A.includes('USER');
+    // 2026 월드컵 48개국 32강 진출 방식:
+    // 각 조 1, 2위(24개국) + 조 3위 중 성적 상위 8개국 = 총 32개국 토너먼트 진출!
+    const topTwoIds = [];
+    const thirdPlaceRows = [];
+    for (const g of WORLD_CUP.GROUPS) {
+      const rows = groupStandings[g];
+      topTwoIds.push(rows[0].id, rows[1].id);
+      if (rows[2]) thirdPlaceRows.push(rows[2]);
+    }
+    const bestEightThirds = rankRows(thirdPlaceRows)
+      .slice(0, 8)
+      .map((r) => r.id);
+
+    const all32Qualifiers = [...topTwoIds, ...bestEightThirds];
+    summary.advanced = all32Qualifiers.includes('USER');
+
     if (!summary.advanced) {
-      state.eliminatedAt = '조별리그';
-      state.champion = advancers.A[0];
+      state.eliminatedAt = '48개국 조별리그';
+      state.champion = topTwoIds[0];
       return { state, summary, reward: scaleReward(WORLD_CUP.ELIMINATED_REWARD, state.tierLevel || 1), finished: true };
     }
-    const order = [
-      advancers.A[0],
-      advancers.B[1],
-      advancers.B[0],
-      advancers.A[1],
-      advancers.C[0],
-      advancers.D[1],
-      advancers.D[0],
-      advancers.C[1],
-    ];
+
     state.phase = 'KNOCKOUT';
-    state.rounds = [{ name: WORLD_CUP.KNOCKOUT_NAMES[0], matches: pairUp(order) }];
+    state.rounds = [{ name: WORLD_CUP.KNOCKOUT_NAMES[0], matches: pairUp(all32Qualifiers) }];
     state.roundIndex = 0;
     return { state, summary, reward: scaleReward(WORLD_CUP.GROUP_ADVANCE_REWARD, state.tierLevel || 1), finished: false };
   },
@@ -855,10 +902,12 @@ const worldCupHandler = {
     const tierBadge = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
     if (status === 'FINISHED') {
       return state.champion === 'USER'
-        ? `🏆 월드컵 우승!${tierBadge} (다음 도전 시 난이도·보상 상승)`
+        ? `🏆 2026 월드컵 우승!${tierBadge}`
         : `${state.eliminatedAt}에서 탈락${tierBadge}`;
     }
-    return state.phase === 'GROUP' ? `조별리그 ${state.matchday}/3차전${tierBadge}` : `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
+    return state.phase === 'GROUP'
+      ? `48개국 조별리그 ${state.matchday}/3차전${tierBadge}`
+      : `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
   },
 };
 
