@@ -140,7 +140,7 @@ export default function HalfTimeModal() {
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:from-emerald-500 hover:to-blue-500"
           >
             <PlayCircle className="h-5 w-5" />
-            ▶️ 후반전 킥오프 (Start 2nd Half)
+            ▶️ 후반전 킥오프
           </button>
         </div>
       </div>

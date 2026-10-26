@@ -195,7 +195,7 @@ export default function SquadAndTacticsPage() {
               onChange={(e) => setSortBy(e.target.value)}
               className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white"
             >
-              <option value="position">정렬: 포지션 순 (FW→MF→DF→GK)</option>
+              <option value="position">정렬: 포지션 순 </option>
               <option value="overall">정렬: OVR 높은순</option>
               <option value="stamina">정렬: 체력 높은순</option>
               <option value="shooting">정렬: 골 결정력 순</option>

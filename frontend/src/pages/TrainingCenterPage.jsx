@@ -278,7 +278,7 @@ export default function TrainingCenterPage() {
                 )}
               </Panel>
 
-              <Panel title="스포츠 과학 의무실">
+              <Panel title="메디컬 센터">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex-1 text-xs text-slate-400">
                     <p>

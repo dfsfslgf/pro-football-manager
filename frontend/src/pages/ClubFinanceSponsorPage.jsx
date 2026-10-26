@@ -136,7 +136,7 @@ export default function ClubFinanceSponsorPage() {
       <Notice notice={notice} />
 
       <Panel
-        title="후원사 포트폴리오 & 계약 조건 다각화 (Tier 1 ~ Tier 6)"
+        title="후원사 포트폴리오"
         right={<span className="text-xs font-bold text-emerald-300">구단 통산 {wins}승 달성</span>}
       >
         <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900/80 p-3">
@@ -233,7 +233,7 @@ export default function ClubFinanceSponsorPage() {
             ))}
           </ul>
         </Panel>
-        <Panel title="단계별 구단 업적 (Step-by-Step Achievements)">
+        <Panel title="단계별 구단 업적">
           <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
             {achievements.map((q) => (
               <QuestRow key={q.key} quest={q} busy={busy === `q-${q.key}`} onClaim={() => handleClaim(q)} />
