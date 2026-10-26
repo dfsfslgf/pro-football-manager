@@ -66,7 +66,7 @@ export default function TransferMarketPage() {
     [players, posFilter]
   );
 
-  // [요구사항 13 해결] 오늘의 이적 매물 즉시 새로고침 기능
+  // 오늘의 이적 매물 즉시 새로고침 기능
   const handleRefreshMarket = async () => {
     setBusy('refresh');
     setNotice(null);
@@ -115,7 +115,7 @@ export default function TransferMarketPage() {
     }
   };
 
-  // [요구사항 50 해결] 선택한 매물 일괄 영입 기능
+  // 선택한 매물 일괄 영입 기능
   const handleBulkBuy = async () => {
     if (!market) return;
     const targets = market.listings.filter((l) => !l.purchased && selectedListings.includes(l.listingKey));
@@ -166,7 +166,7 @@ export default function TransferMarketPage() {
     }
   };
 
-  // [요구사항 50 해결] 선택한 잉여 선수 일괄 방출 기능 (최소 보유 인원 18명 자동 보호)
+  // 선택한 잉여 선수 일괄 방출 기능 (최소 보유 인원 18명 자동 보호)
   const handleBulkRelease = async () => {
     const maxCanRelease = Math.max(0, players.length - 18);
     if (maxCanRelease <= 0) {

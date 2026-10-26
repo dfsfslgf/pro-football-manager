@@ -3,7 +3,7 @@ import TrainingService from '../services/TrainingService.js';
 import { ValidationError } from '../constants/errorCodes.js';
 
 /**
- * 값이 양의 안전한 정수인지 검사하고 반환합니다.
+ * 값이 양의 안전한 정수인지 검사하고 반환.
  * @param {unknown} value
  * @param {string} name
  * @returns {number}
@@ -11,13 +11,12 @@ import { ValidationError } from '../constants/errorCodes.js';
  */
 function requireId(value, name) {
   const n = Number(value);
-  if (!Number.isSafeInteger(n) || n <= 0) throw new ValidationError(`${name} 는 1 이상의 정수여야 합니다.`);
+  if (!Number.isSafeInteger(n) || n <= 0) throw new ValidationError(`${name} 는 1 이상의 정수여야 .`);
   return n;
 }
 
 /**
  * 구단 운영(대시보드, 선수 기록, 훈련/의무실, 이적 시장, 스폰서/퀘스트) HTTP 컨트롤러.
- * 대상 유저는 인증 토큰(req.userId)으로만 결정됩니다.
  */
 export default class ClubManagementController {
   /**
@@ -42,7 +41,7 @@ export default class ClubManagementController {
   static levelUp = ClubManagementController.handle((req) => TrainingService.levelUp(req.userId, requireId(req.body?.userPlayerId, 'userPlayerId')));
 
   static trainPosition = ClubManagementController.handle((req) => {
-    if (typeof req.body?.roleCode !== 'string') throw new ValidationError('roleCode 가 필요합니다.');
+    if (typeof req.body?.roleCode !== 'string') throw new ValidationError('roleCode 가 필요.');
     return TrainingService.trainPosition(req.userId, requireId(req.body.userPlayerId, 'userPlayerId'), req.body.roleCode);
   });
 
@@ -53,7 +52,7 @@ export default class ClubManagementController {
   static market = ClubManagementController.handle((req) => ClubService.getMarket(req.userId));
 
   static buy = ClubManagementController.handle((req) => {
-    if (typeof req.body?.listingKey !== 'string') throw new ValidationError('listingKey 가 필요합니다.');
+    if (typeof req.body?.listingKey !== 'string') throw new ValidationError('listingKey 가 필요.');
     return ClubService.buyListing(req.userId, req.body.listingKey);
   }, 201);
 

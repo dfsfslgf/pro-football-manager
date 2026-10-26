@@ -17,7 +17,7 @@ function sign(payload) {
 }
 
 /**
- * 유저 ID 를 담은 서명 토큰을 발급합니다. (형식: base64url(payload).signature)
+ * 유저 ID 를 담은 서명 토큰을 발급 (형식: base64url(payload).signature)
  * @param {number} userId
  * @returns {string}
  */
@@ -27,7 +27,7 @@ export function issueToken(userId) {
 }
 
 /**
- * 토큰을 검증하고 유저 ID 를 반환합니다.
+ * 토큰을 검증하고 유저 ID 를 반환
  * @param {string} token
  * @returns {number}
  * @throws {UnauthorizedError}

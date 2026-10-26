@@ -3,7 +3,6 @@ import mysql from 'mysql2/promise';
 
 /**
  * MySQL 커넥션 풀.
- * BIGINT 컬럼(user_id, gold 등)이 안전한 범위 내에서는 Number 로 반환되도록 supportBigNumbers 를 켭니다.
  * @type {import('mysql2/promise').Pool}
  */
 const pool = mysql.createPool({
@@ -20,7 +19,7 @@ const pool = mysql.createPool({
 });
 
 /**
- * 풀에서 커넥션을 하나 획득해 ping 으로 DB 연결 상태를 검증합니다.
+ * 풀에서 커넥션을 하나 획득해 ping 으로 DB 연결 상태를 검증.
  * @returns {Promise<boolean>} 연결에 성공하면 true (실패 시 예외 전파)
  */
 export async function testConnection() {

@@ -2,7 +2,7 @@ import pool from '../config/database.js';
 import * as Q from '../queries/clubQueries.js';
 
 /**
- * JSON 컬럼 값을 객체로 변환합니다.
+ * JSON 컬럼 값을 객체로 변환.
  * @param {string|Object|null} value
  * @param {*} fallback
  * @returns {*}
@@ -18,7 +18,7 @@ function parseJson(value, fallback) {
 }
 
 /**
- * 유저/구단/선수 상세/대회/퀘스트/이적시장 데이터 접근 계층. conn 이 없으면 pool 을 사용합니다.
+ * 유저/구단/선수 상세/대회/퀘스트/이적시장 데이터 접근 계층. conn 이 없으면 pool 을 사용.
  */
 export default class ClubRepository {
   /**
@@ -82,7 +82,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 일반 등급 마스터 선수를 (포지션, 세부 포지션) 조건으로 조회합니다.
+   * 일반 등급 마스터 선수를 (포지션, 세부 포지션) 조건으로 조회.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {string} position
    * @param {string|null} role
@@ -97,7 +97,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 라인업 슬롯을 지정해 선수를 지급합니다.
+   * 라인업 슬롯을 지정해 선수를 지급.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @param {number} playerMasterId
@@ -111,8 +111,8 @@ export default class ClubRepository {
   }
 
   /**
-   * 보유 선수 전체를 누적 기록과 함께 조회합니다.
-   * (과거 데이터의 유효슈팅 < 득점 불일치를 조회 시점에 자동 교정합니다)
+   * 보유 선수 전체를 누적 기록과 함께 조회.
+   * (과거 데이터의 유효슈팅 < 득점 불일치를 조회 시점에 자동 교정)
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<Object[]>}
@@ -154,7 +154,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 선수 1명을 행 잠금으로 조회합니다.
+   * 선수 1명을 행 잠금으로 조회.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @param {number} userPlayerId
@@ -216,7 +216,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 소모 체력이 있는 선수 목록을 잠금 조회합니다.
+   * 소모 체력이 있는 선수 목록을 잠금 조회.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @returns {Promise<Array<{id:number, stamina:number}>>}
@@ -238,9 +238,8 @@ export default class ClubRepository {
   }
 
   /**
-   * [요구사항 14 완벽 반영]
    * 경기 사이의 휴식 회복: 전 선수가 잃은 체력의 ratio 만큼 회복하며,
-   * 경기에 출전하지 않은 벤치/예비 선수들은 휴식 보너스로 손실 체력의 85%(최소 +35)를 즉시 추가 회복합니다.
+   * 경기에 출전하지 않은 벤치/예비 선수들은 휴식 보너스로 손실 체력의 85%(최소 +35)를 즉시 추가 회복.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @param {number} ratio 0~1 회복 비율
@@ -282,7 +281,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 경기 후 선수 한 명의 누적 기록/경험치/체력을 반영합니다.
+   * 경기 후 선수 한 명의 누적 기록/경험치/체력을 반영.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @param {Object} s { userPlayerId, played, goals, assists, cleanSheet, conceded, saves, shotsOnTarget, yellow, red, rating, exp, gauge, stamina }
@@ -311,7 +310,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 요청한 선수들의 포지션/현재 체력을 조회합니다.
+   * 요청한 선수들의 포지션/현재 체력을 조회.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @param {number[]} ids
@@ -324,7 +323,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 포메이션/팀 전술 설정을 조회합니다.
+   * 포메이션/팀 전술 설정을 조회.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<{formation:string, teamTactics:Object|null}|null>}
@@ -460,7 +459,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 구단 통산 전적(대회 경기 기준)을 집계합니다.
+   * 구단 통산 전적(대회 경기 기준)을 집계.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<{matches:number, wins:number, draws:number, losses:number, goalsFor:number, goalsAgainst:number}>}
@@ -512,7 +511,7 @@ export default class ClubRepository {
   }
 
   /**
-   * 후보 선수를 지급합니다. (벤치/라인업 미배치)
+   * 후보 선수를 지급. (벤치/라인업 미배치)
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @param {number} playerMasterId

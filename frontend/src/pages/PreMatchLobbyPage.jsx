@@ -82,7 +82,7 @@ export default function PreMatchLobbyPage() {
   const { opponent, scenario } = next;
   const meta = MODE_META[mode];
 
-  // 월드컵 모드일 경우 선택한 국가대표팀 이름/엠블럼 적용 (요구사항 6 반영)
+  // 월드컵 모드일 경우 선택한 국가대표팀 이름/엠블럼 적용
   const wcNation = params?.nation || selectedWorldCupNation;
   const displayHomeName = mode === 'WORLD_CUP' && wcNation ? `${wcNation.name} 대표팀` : club.name;
   const displayHomeEmblem = mode === 'WORLD_CUP' && wcNation?.emblem ? wcNation.emblem : club.emblemIcon;

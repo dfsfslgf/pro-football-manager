@@ -70,8 +70,7 @@ export default class SquadService {
     const usedIds = new Set(starters.map((p) => p.userPlayerId));
     const rest = players.filter((p) => !usedIds.has(p.userPlayerId));
 
-    // [요구사항 2번 핵심 해결]
-    // DB에 저장된 벤치 후보(lineupSlot !== null)가 있으면, 절대 임의로 섞거나 예비 선수와 합치지 않고 저장된 슬롯 순서 그대로 반환!
+    // DB에 저장된 벤치 후보가 있으면, 임의로 섞거나 예비 선수와 합치지 않고 저장된 슬롯 순서 그대로 반환
     const savedBench = rest
       .filter((p) => p.lineupSlot !== null && Number(p.lineupSlot) >= 11)
       .sort(bySlotThenLevel);

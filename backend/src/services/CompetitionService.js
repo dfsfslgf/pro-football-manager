@@ -691,7 +691,7 @@ const cupHandler = {
       eliminated: r.eliminated,
       rounds: state.rounds,
     };
-    // 우승 시 대규모 챔피언 보너스 + 난이도 단계(tierLevel) 배율 적용!
+    // 우승 시 대규모 챔피언 보너스 + 난이도 단계(tierLevel) 배율 적용
     const baseRoundReward = r.champion
       ? { gold: 25000, cashFree: 400 }
       : r.userWon
@@ -1065,7 +1065,7 @@ export default class CompetitionService {
         throw new ConflictError('진행 중인 대회가 있습니다. 새로 시작하려면 기존 진행을 포기해야 합니다.');
       }
       const club = await ClubRepository.findClub(conn, userId);
-      // [요구사항 6번 해결] 리그뿐만 아니라 챔피언스컵, 월드컵도 이전 상태(prev)를 전달하여 우승 후 재시작 시 난이도·보상 단계가 상승하도록 연결!
+      // 리그뿐만 아니라 챔피언스컵, 월드컵도 이전 상태(prev)를 전달하여 우승 후 재시작 시 난이도,보상 단계가 상승하도록 연결
       const prev = existing ? existing.state : null;
       const state = handler.create({ userId, club, prev });
       await ClubRepository.saveCompetition(conn, userId, mode, 'ACTIVE', state);

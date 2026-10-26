@@ -93,8 +93,7 @@ function toBenchPlayer(player) {
 }
 
 /**
- * [요구사항 7번 완벽 구현]
- * 남은 선수 풀(pool)에서 다음 11명의 황금 밸런스 후보(벤치) 구성을 OVR 높은 순으로 자동 선발합니다:
+ * 남은 선수 풀(pool)에서 다음 11명의 후보 구성을 OVR 높은 순으로 자동 선발
  * - GK 1명
  * - 풀백 2명 (LB/LWB 1명, RB/RWB 1명)
  * - 센터백 2명 (CB/LCB/RCB 2명)
@@ -253,7 +252,7 @@ export const useSquadStore = create((set, get) => ({
   },
 
   /**
-   * [요구사항 7번 해결] 후보(벤치) 11명만 포지션별 최고 OVR(GK 1, 풀백 2, CB 2, 윙어 2, 중미 2, 공격수 2)로 자동 완성!
+   * 후보 11명만 포지션별 최고 OVR(GK 1, 풀백 2, CB 2, 윙어 2, 중미 2, 공격수 2)로 자동 완성
    */
   autoFillBench: () => {
     const { bench, reserve } = get();
@@ -267,7 +266,7 @@ export const useSquadStore = create((set, get) => ({
   },
 
   /**
-   * [요구사항 7번 해결] 선발 11명 + 후보 11명(총 22명)을 한 번에 포지션별 최고 능력치 선수로 자동 완성!
+   * 선발 11명 + 후보 11명(총 22명)을 한 번에 포지션별 최고 능력치 선수로 자동 완성
    */
   autoFillAll: () => {
     const { formation, starters, bench, reserve } = get();

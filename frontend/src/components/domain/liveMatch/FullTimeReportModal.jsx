@@ -36,9 +36,8 @@ function MomCard({ mom }) {
 }
 
 /**
- * [요구사항 15번 해결]
  * 1위 우승(🏆), 1~4위 챔피언스리그(🟦 UCL), 5~6위 유로파리그(🟧 UEL),
- * 그리고 독일 분데스리가(18팀)는 하위 2팀(17~18위), 타 리그는 하위 3팀 강등(🔻 REL) 표시!
+ * 그리고 독일 분데스리가(18팀)는 하위 2팀(17~18위), 타 리그는 하위 3팀 강등(🔻 REL) 표시
  */
 export function StandingsTable({ rows, limit = 24, isBundesliga = false, division = 1 }) {
   const totalTeams = rows.length;
@@ -108,7 +107,7 @@ export function StandingsTable({ rows, limit = 24, isBundesliga = false, divisio
 }
 
 /**
- * [요구사항 17번 완벽 해결] 경기 종료 후에도 양 팀의 전체 경기 통계(점유율, 슈팅, 유효슈팅, 패스성공률, 태클, 선방, 코너킥, 반칙)를 보여줍니다.
+ * 경기 종료 후에도 양 팀의 전체 경기 통계(점유율, 슈팅, 유효슈팅, 패스성공률, 태클, 선방, 코너킥, 반칙)를 보여줌.
  */
 function FullTimeMatchStatsSection({ report, fallbackHomeStats, fallbackAwayStats }) {
   const h = report?.homeStats || fallbackHomeStats || {};

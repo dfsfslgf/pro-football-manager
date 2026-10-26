@@ -297,7 +297,7 @@ export const TEAM_TACTIC_LABELS = {
   tempo: { SLOW: '느림', NORMAL: '보통', FAST: '빠름' },
   defensiveLine: { DEEP: '깊숙이 내림', NORMAL: '보통', HIGH: '높게 올림' },
   pressing: { LOW: '낮음', MEDIUM: '보통', HIGH: '강한 압박' },
-  offsideTrap: { OFF: '사용 안 함 (뒷공간 커버)', ON: '활성화 (라인 일제 전진)' }, // 👈 추가
+  offsideTrap: { OFF: '사용 안 함 (뒷공간 커버)', ON: '활성화 (라인 일제 전진)' }, 
 };
 
 /**

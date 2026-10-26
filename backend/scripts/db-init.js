@@ -5,8 +5,7 @@ import mysql from 'mysql2/promise';
 import { ensurePlayerMasterSeed } from '../src/models/seedData.js';
 
 /**
- * schema.sql 을 적용하고 선수 마스터 시드를 삽입합니다. (npm run db:init)
- * 데이터베이스(DB_NAME)는 미리 생성되어 있어야 합니다: CREATE DATABASE pro_football_manager CHARACTER SET utf8mb4;
+ * schema.sql 을 적용하고 선수 마스터 시드를 삽입. (npm run db:init)
  * @returns {Promise<void>}
  */
 async function main() {

@@ -4,7 +4,7 @@ import { errorMessage, getToken, setToken, setUnauthorizedHandler } from '../api
 import useNavStore from './useNavStore.js';
 
 /**
- * 인증/구단 기본 정보 스토어. 토큰은 localStorage 에 보관하며 서버가 항상 userId 의 기준입니다.
+ * 인증/구단 기본 정보 스토어
  */
 export const useAuthStore = create((set, get) => ({
   status: 'checking',
@@ -14,7 +14,7 @@ export const useAuthStore = create((set, get) => ({
   isSubmitting: false,
 
   /**
-   * 앱 시작 시 저장된 토큰으로 로그인 상태를 복원합니다.
+   * 앱 시작 시 저장된 토큰으로 로그인 상태를 복원
    * @returns {Promise<void>}
    */
   init: async () => {
@@ -33,7 +33,7 @@ export const useAuthStore = create((set, get) => ({
   },
 
   /**
-   * 로그인합니다.
+   * 로그인
    * @param {{nickname:string, password:string}} credentials
    * @returns {Promise<boolean>} 성공 여부
    */
@@ -52,7 +52,7 @@ export const useAuthStore = create((set, get) => ({
   },
 
   /**
-   * 회원가입과 함께 구단을 창단합니다. (가입 즉시 로그인)
+   * 회원가입과 함께 구단을 창단 (가입 즉시 로그인)
    * @param {{nickname:string, password:string, clubName:string, emblemIcon:string, emblemColor:string}} payload
    * @returns {Promise<boolean>} 성공 여부
    */
@@ -71,14 +71,14 @@ export const useAuthStore = create((set, get) => ({
   },
 
   /**
-   * 구단 정보(후원사 등)를 갱신합니다.
+   * 구단 정보(후원사 등)를 갱신
    * @param {Object} patch
    * @returns {void}
    */
   patchClub: (patch) => set((s) => ({ club: s.club ? { ...s.club, ...patch } : s.club })),
 
   /**
-   * 로그아웃하고 모든 로컬 인증 정보를 지웁니다.
+   * 로그아웃하고 모든 로컬 인증 정보를 지움
    * @returns {void}
    */
   logout: () => {

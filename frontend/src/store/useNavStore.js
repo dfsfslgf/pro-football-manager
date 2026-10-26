@@ -1,8 +1,7 @@
 import { create } from 'zustand';
 
 /**
- * 화면(페이지) 전환 상태. 라우터 라이브러리 없이 page 키로 화면을 전환합니다.
- * page: lobby | squad | records | scout | training | market | finance | modes | prematch | match
+ * 화면(페이지) 전환 상태. 라우터 라이브러리 없이 page 키로 화면을 전환
  */
 export const useNavStore = create((set) => ({
   page: 'lobby',

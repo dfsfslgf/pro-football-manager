@@ -1,6 +1,6 @@
 /**
  * 구장 좌표계: 가로 0~100, 세로 0~100 (%). 홈팀은 좌->우 공격 기준이며
- * 원정팀은 getFormationSlots(code, 'AWAY') 로 baseX 를 100 - x 로 대칭 변환합니다.
+ * 원정팀은 getFormationSlots(code, 'AWAY') 로 baseX 를 100 - x 로 대칭 변환
  */
 
 const slot = (role, label, baseX, baseY) => ({ role, label, baseX, baseY });

@@ -1,5 +1,5 @@
 /**
- * 문자열 시드를 32비트 정수 해시로 변환합니다. (FNV-1a)
+ * 문자열 시드를 32비트 정수 해시로 변환. (FNV-1a)
  * @param {string} text
  * @returns {number}
  */
@@ -13,7 +13,7 @@ export function hashString(text) {
 }
 
 /**
- * 시드 기반 난수 생성기(mulberry32). 같은 시드는 항상 같은 수열을 만듭니다.
+ * 시드 기반 난수 생성기(mulberry32). 같은 시드는 항상 같은 수열을 만듦.
  * @param {string|number} seed
  * @returns {{next: () => number, int: (min:number, max:number) => number, pick: <T>(arr:T[]) => T, shuffle: <T>(arr:T[]) => T[], poisson: (lambda:number) => number}}
  */

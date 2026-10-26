@@ -12,7 +12,7 @@ export function notFoundHandler(req, res, next) {
 }
 
 /**
- * Express 전역 에러 핸들러. CustomError 는 코드/메시지를 그대로, 그 외는 500 으로 마스킹합니다.
+ * Express 전역 에러 핸들러.
  * @param {Error} err
  * @param {import('express').Request} req
  * @param {import('express').Response} res

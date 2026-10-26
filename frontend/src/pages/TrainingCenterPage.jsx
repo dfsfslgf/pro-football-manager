@@ -38,7 +38,7 @@ export default function TrainingCenterPage() {
       const result = await action();
       setWallet(result.remainingWallet);
       await refreshPlayers();
-      // [요구사항 2번 해결] loaded: false 로 날리지 않고 백업된 후보를 보존하며 최신 능력치만 동기화!
+
       if (useSquadStore.getState().loaded) {
         await useSquadStore.getState().loadSquad(true);
       }

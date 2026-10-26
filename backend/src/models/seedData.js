@@ -8,7 +8,7 @@ const PROFILES = {
 };
 
 /**
- * 프로필 능력치를 목표 OVR 에 맞게 비율 조정한 base_stats 를 만듭니다.
+ * 프로필 능력치를 목표 OVR 에 맞게 비율 조정한 base_stats 생성
  * @param {'GK'|'DF'|'MF'|'FW'} position
  * @param {number} targetOvr
  * @param {number} jitterSeed 스탯별 결정론적 변동 시드
@@ -31,9 +31,8 @@ export function buildBaseStats(position, targetOvr, jitterSeed = 0) {
 }
 
 /**
- * [요구사항 21 & 23 완벽 반영]
  * 가상 이름 조합을 폐기하고 유럽 주요 리그(1·2부) + K리그 1·2 + MLS 실제 선수 120명을
- * 등급(LEGEND / EPIC / RARE / COMMON) 및 포지션(GK / DF / MF / FW)별로 중복 없이 정의합니다.
+ * 등급(LEGEND / EPIC / RARE / COMMON) 및 포지션(GK / DF / MF / FW)별로 중복 없이 정의.
  */
 export const REAL_PLAYER_MASTER_CATALOG = [
   /* ============================== LEGEND (OVR 85 ~ 92, drop_weight: 2) ============================== */
@@ -209,7 +208,7 @@ export const REAL_PLAYER_MASTER_CATALOG = [
 ];
 
 /**
- * player_master 시드 행을 실제 선수 카탈로그 기반으로 생성합니다.
+ * player_master 시드 행을 실제 선수 카탈로그 기반으로 생성.
  * @returns {Array<{name:string, main_position:string, preferred_role:string, drop_weight:number, base_stats:Object, tags:string[]}>}
  */
 export function generatePlayerMasterRows() {
@@ -225,7 +224,7 @@ export function generatePlayerMasterRows() {
 
 /**
  * player_master 가 비어 있으면 실제 선수 시드를 삽입하고,
- * 기존에 가상 이름(72명)이 이미 들어가 있는 경우에도 ID를 유지한 채 실제 선수 이름과 능력치로 자동 마이그레이션합니다.
+ * 기존에 가상 이름(72명)이 이미 들어가 있는 경우에도 ID를 유지한 채 실제 선수 이름과 능력치로 자동 마이그레이션.
  * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor
  * @returns {Promise<number>} 삽입/갱신한 행 수
  */

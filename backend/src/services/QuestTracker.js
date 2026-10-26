@@ -12,7 +12,7 @@ export function todayKey(date = new Date()) {
 }
 
 /**
- * 일일 퀘스트 진행도를 가산합니다. (정의되지 않은 키는 무시)
+ * 일일 퀘스트 진행도 가산. (정의되지 않은 키는 무시)
  * @param {import('mysql2/promise').PoolConnection} conn 트랜잭션 커넥션
  * @param {number} userId
  * @param {keyof typeof DAILY_QUESTS} questKey

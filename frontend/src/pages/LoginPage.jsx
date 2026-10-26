@@ -52,9 +52,6 @@ export default function LoginPage() {
         <header className="text-center">
           <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-emerald-300">Football Manager</p>
           <h1 className="mt-1 text-2xl font-black text-white">PRO FOOTBALL MANAGER</h1>
-          <p className="mt-1 text-xs text-slate-400">
-            실제 리그 규모(EPL 20팀 · 분데스리가 18팀 · 라리가 20팀 · K리그 · MLS) 완벽 구현!
-          </p>
         </header>
 
         <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-700">

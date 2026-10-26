@@ -3,7 +3,7 @@
 export const INITIAL_GRANT = Object.freeze({ gold: 15000, cashFree: 500, cashPaid: 0 });
 
 /**
- * [요구사항 14번 해결] 창단 시 지급하는 22명 (선발 11명 + 벤치 후보 최대 11명 지원)
+ * 창단 시 지급하는 22명 (선발 11명 + 벤치 후보 최대 11명 지원)
  */
 export const STARTER_PLAN = Object.freeze({
   formation: '4-3-3',
@@ -38,7 +38,7 @@ export const STARTER_PLAN = Object.freeze({
 export const EMBLEM_ICONS = Object.freeze(['🦁', '🐺', '🦅', '🐉', '⚡', '🔥', '🛡️', '⭐', '👑', '🐯', '🦈', '🌊', '🐓', '⛵', '🔱', '💣']);
 
 /**
- * [요구사항 9번 해결] 모든 스카우트 패키지(공격/미드 저격, 수비/골키퍼 저격, 골드 기본 스카우트)에 1회 및 10연차(10% 할인) 완벽 적용!
+ * 모든 스카우트 패키지(공격/미드 저격, 수비/골키퍼 저격, 골드 기본 스카우트)에 1회 및 10연차 10% 할인 적용
  */
 export const SCOUT_PACKAGES = Object.freeze({
   PREMIUM_ALL: {

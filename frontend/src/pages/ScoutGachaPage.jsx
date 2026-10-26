@@ -54,7 +54,7 @@ export default function ScoutGachaPage() {
     refreshOverview();
     fetchScoutPackages()
       .then((list) => {
-        // [요구사항 9번 완벽 해결] 모든 패키지(공격/미드 저격, 수비/골키퍼 저격, 골드 기본 스카우트)에 10연차 옵션(10% 할인) 강제 보장
+        // 모든 패키지(공격/미드 저격, 수비/골키퍼 저격, 골드 기본 스카우트)에 10연차 옵션 10% 할인
         const enriched = (list || []).map((pkg) => {
           const singleCost = Number(pkg.costs?.[1] || (pkg.currency === 'GOLD' ? 2000 : 150));
           const tenCost = Number(pkg.costs?.[10] || Math.round(singleCost * 9));

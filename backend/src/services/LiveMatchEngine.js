@@ -154,7 +154,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       const safeStats = stats || {};
       const out = {};
       
-      // 통계 필드들 강제 기본값 방어 (null/undefined 절대 차단)
+      // 통계 필드들 강제 기본값 방어 (null/undefined 차단)
       out.possession = Number.isInteger(safeStats.possession) ? safeStats.possession : 50;
       out.shots = Math.max(minGoals, Number.isInteger(safeStats.shots) ? safeStats.shots : minGoals);
       out.shotsOnTarget = Math.max(minGoals, Number.isInteger(safeStats.shotsOnTarget) ? safeStats.shotsOnTarget : minGoals);
@@ -241,7 +241,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       }
     }
 
-    // 선수별 득점 수와 개인 유효슈팅/슈팅 수 및 팀 전체 슈팅 통계 동기화 (요구사항 17 완벽 해결)
+    // 선수별 득점 수와 개인 유효슈팅/슈팅 수 및 팀 전체 슈팅 통계 동기화 
     for (const entry of entries) {
       const playerGoals = events.filter((e) => e.team === 'HOME' && e.type === 'GOAL' && e.primaryPlayerId === entry.userPlayerId).length;
       if (entry.shotsOnTarget < playerGoals) entry.shotsOnTarget = playerGoals;
@@ -295,10 +295,10 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
         const cleanSheet = validated.scoreAway === 0 && (isGK || isDF) && entry.minutesPlayed >= 45 ? 1 : 0;
         const conceded = isGK && entry.minutesPlayed >= 45 ? validated.scoreAway : 0;
 
-        // [요구사항 17 완벽 보장] DB에 저장되는 shotsOnTarget은 무조건 이번 경기 goals 이상!
+        // DB에 저장되는 shotsOnTarget은 무조건 이번 경기 goals 이상
         const validShotsOnTarget = Math.max(goals, entry.shotsOnTarget || 0);
 
-        // [요구사항 19 반영] 포지션별 활약도(수비 무실점, 미드필더 중원 장악, 골키퍼 선방, 공격수 슈팅 효율)에 따른 정밀 평점 산출
+        // 포지션별 활약도(수비 무실점, 미드필더 중원 장악, 골키퍼 선방, 공격수 슈팅 효율)에 따른 정밀 평점 산출
         let posBonus = 0;
         if (isMF && entry.minutesPlayed >= 60) posBonus += (validated.homeStats?.possession >= 52 ? 0.45 : 0.2);
         if (isDF && validated.scoreAway <= 1) posBonus += 0.35;
@@ -373,7 +373,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
       const sponsorGold = sponsor.matchFee + (outcome === 'WIN' ? sponsor.winBonus : 0);
       const competition = await CompetitionService.applyResult(conn, userId, context, validated.scoreHome, validated.scoreAway);
 
-      // [요구사항 47 반영] 리그/컵/월드컵 우승 달성 시 특별 챔피언 보너스(골드 + 캐시) 추가 지급!
+      // 리그/컵/월드컵 우승 달성 시 특별 챔피언 보너스(골드 + 캐시) 추가 지급
       const isChampion = Boolean(competition.summary?.champion || competition.summary?.seasonEnd?.champion);
       const championBonusGold = isChampion ? 15000 : 0;
       const championBonusCash = isChampion ? 300 : 0;
@@ -394,7 +394,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
         },
       };
 
-      // 1. 경기에 출전한 선수들의 기록 및 소모된 체력을 먼저 반영
+      // 경기에 출전한 선수들의 기록 및 소모된 체력을 먼저 반영
       for (const p of players) {
         await ClubRepository.applyMatchStats(conn, userId, {
           userPlayerId: p.userPlayerId,
@@ -414,7 +414,7 @@ const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamin
         });
       }
 
-      // 2. [요구사항 14 완벽 해결] 전체 선수 기본 휴식 회복 + 경기에 출전하지 않은 벤치/예비 선수 추가 체력 회복(+40%, 최대 100)!
+      // 전체 선수 기본 휴식 회복 + 경기에 출전하지 않은 벤치/예비 선수 추가 체력 회복(+40%, 최대 100)
       await ClubRepository.restAllPlayers(conn, userId, TRAINING.REST_RECOVERY_RATIO);
       if (ids.length > 0) {
         const placeholders = ids.map(() => '?').join(',');

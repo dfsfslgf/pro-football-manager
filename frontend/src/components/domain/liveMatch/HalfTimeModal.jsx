@@ -17,7 +17,6 @@ export default function HalfTimeModal() {
 
   if (!isOpen || !summary || !homeTeam || !awayTeam) return null;
 
-  // [요구사항 7 완벽 해결] summary 스냅샷 오차를 방지하기 위해 실시간 homeTeam.stats / awayTeam.stats 와 직접 동기화!
   const totalTicks = Math.max(1, (homeTeam.stats?.possessionTicks || 1) + (awayTeam.stats?.possessionTicks || 1));
   const liveHomePoss = Math.round(((homeTeam.stats?.possessionTicks || 1) / totalTicks) * 100);
   const liveAwayPoss = 100 - liveHomePoss;

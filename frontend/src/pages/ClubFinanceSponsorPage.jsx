@@ -8,7 +8,6 @@ import Panel from '../components/common/Panel.jsx';
 import Notice from '../components/common/Notice.jsx';
 import { formatNumber } from '../constants/gameConfig.js';
 
-// [요구사항 20번 완벽 해결] 6개 스폰서 각각의 정확한 Tier 1 ~ Tier 6 매핑!
 const SPONSOR_TIER_MAP = {
   BASIC: { tier: 'Tier 1 · 로컬 스폰서', desc: '연고지 소상공인 연합 후원 (조건 없음)' },
   REGIONAL: { tier: 'Tier 2 · 지역 기업', desc: '수도권 중견 물류·유통 그룹 파트너십' },

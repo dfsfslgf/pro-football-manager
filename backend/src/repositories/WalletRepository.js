@@ -8,11 +8,11 @@ import {
 
 /**
  * 지갑/재화 로그 데이터 접근 계층. 모든 메서드는 트랜잭션 커넥션(conn)을 첫 인자로 받으며,
- * conn 이 없으면 기본 pool 을 사용합니다.
+ * conn 이 없으면 기본 pool 을 사용.
  */
 export default class WalletRepository {
   /**
-   * 지갑을 잠금 없이 조회합니다. (읽기 전용 화면용)
+   * 지갑을 잠금 없이 조회. (읽기 전용 화면용)
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<{userId:number, cashPaid:number, cashFree:number, gold:number}|null>}
@@ -24,7 +24,7 @@ export default class WalletRepository {
   }
 
   /**
-   * 지갑을 배타적 락(FOR UPDATE)으로 조회합니다. 반드시 트랜잭션 내에서 호출해야 락이 유지됩니다.
+   * 지갑 조회
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<{userId:number, cashPaid:number, cashFree:number, gold:number}|null>}
@@ -42,7 +42,7 @@ export default class WalletRepository {
   }
 
   /**
-   * 지갑 잔액을 갱신합니다.
+   * 지갑 잔액을 갱신.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {{userId:number, cashPaid:number, cashFree:number, gold:number}} wallet
    * @returns {Promise<number>} 영향받은 행 수
@@ -54,7 +54,7 @@ export default class WalletRepository {
   }
 
   /**
-   * 재화 변동 영수증(transactions)을 기록합니다.
+   * 재화 변동 영수증(transactions)을 기록.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {{userId:number, type:'EARN'|'SPEND'|'REFUND', currencyType:string, amount:number, balanceAfterPaid:number, balanceAfterFree:number, reason:string}} txData
    * @returns {Promise<number>} 생성된 transaction id

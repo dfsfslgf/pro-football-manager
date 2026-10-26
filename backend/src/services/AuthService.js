@@ -11,7 +11,7 @@ const scrypt = promisify(scryptCb);
 const DEFAULT_TEAM_TACTICS = { mentality: 'BALANCED', passingStyle: 'MIXED', tempo: 'NORMAL', defensiveLine: 'NORMAL', pressing: 'MEDIUM' };
 
 /**
- * scrypt 로 비밀번호 해시를 만듭니다. (형식: salt:hash)
+ * scrypt 로 비밀번호 해시를 생성 (형식: salt:hash)
  * @param {string} password
  * @returns {Promise<string>}
  */
@@ -23,7 +23,7 @@ async function hashPassword(password) {
 
 /**
  * @param {string} password
- * @param {string} stored salt:hash
+ * @param {string} stored 실제 저장된 salt:hash
  * @returns {Promise<boolean>}
  */
 async function verifyPassword(password, stored) {
@@ -38,7 +38,7 @@ async function verifyPassword(password, stored) {
  */
 export default class AuthService {
   /**
-   * 회원가입 + 구단 창단: 유저/구단/지갑/시작 선수 18명/기본 전술을 한 트랜잭션으로 생성합니다.
+   * 회원가입 + 구단 창단: 유저/구단/지갑/시작 선수 18명/기본 전술을 한 트랜잭션으로 생성.
    * @param {{nickname:string, password:string, clubName:string, emblemIcon:string, emblemColor:string}} input
    * @returns {Promise<{token:string, user:Object, club:Object}>}
    * @throws {ValidationError|ConflictError}
@@ -79,7 +79,7 @@ export default class AuthService {
   }
 
   /**
-   * 시작 선수 18명(선발 11 + 벤치 7)을 지급하고 라인업 슬롯을 배정합니다.
+   * 시작 선수 18명(선발 11 + 벤치 7)을 지급하고 라인업 슬롯을 배정.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @returns {Promise<void>}
@@ -117,7 +117,7 @@ export default class AuthService {
   }
 
   /**
-   * 현재 유저와 구단 정보를 반환합니다.
+   * 현재 유저와 구단 정보를 반환.
    * @param {number} userId
    * @returns {Promise<{user:{id:number, nickname:string}, club:Object}>}
    * @throws {UnauthorizedError}

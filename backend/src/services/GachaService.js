@@ -21,10 +21,9 @@ function pickWeighted(candidates) {
 }
 
 /**
- * [요구사항 1번 완벽 해결]
  * 골드 기본 스카우트(GOLD_BASIC) 전용 추첨기:
- * - LEGEND: 0% (절대 등장하지 않음)
- * - EPIC: 정확히 0.4% (0.004)
+ * - LEGEND: 0% 
+ * - EPIC: 0.4% (0.004)
  * - RARE: 19.6% (0.196)
  * - COMMON: 80.0% (0.800)
  */
@@ -68,7 +67,7 @@ function pickGoldBasicCandidate(candidates) {
 
 export default class GachaService {
   /**
-   * 스카우트 패키지 목록과 등급별 확률표를 반환합니다.
+   * 스카우트 패키지 목록과 등급별 확률표를 반환.
    */
   static async getPackages() {
     const masters = await ClubRepository.getAllMasters(null);

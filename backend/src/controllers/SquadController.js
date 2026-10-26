@@ -1,8 +1,6 @@
 import SquadService from '../services/SquadService.js';
 
-/**
- * 포메이션 및 선발/벤치/후보 라인업 HTTP 컨트롤러. 대상 유저는 인증 토큰(req.userId)에서만 결정됩니다.
- */
+
 export default class SquadController {
   /**
    * GET /api/v1/squad/lineup
@@ -21,7 +19,6 @@ export default class SquadController {
 
   /**
    * PUT /api/v1/squad/lineup
-   * body: { formation, teamTactics, starterIds: number[11], benchIds: number[<=7], instructions: {userPlayerId: instruction} }
    * @param {import('express').Request} req
    * @param {import('express').Response} res
    * @param {import('express').NextFunction} next

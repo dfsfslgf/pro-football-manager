@@ -628,7 +628,7 @@ export const useLiveMatchStore = create((set, get) => ({
     }),
 
   /**
-   * [신규 핵심 액션] 캔버스에서 슬라이딩 태클 파울 및 백태클(악의성 기반 경고/다이렉트 퇴장) 발생 시 즉시 반영
+   * 캔버스에서 슬라이딩 태클 파울 및 백태클(악의성 기반 경고/다이렉트 퇴장) 발생 시 즉시 반영
    */
   recordCanvasFoulAndCard: ({ defenderTeamSide, foulerSlotIndex, victimName, isFromBehind, cardSeverity }) =>
     set((state) => {

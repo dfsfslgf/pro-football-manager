@@ -4,7 +4,7 @@ import { GAME_RULES } from '../constants/gameRules.js';
 const STAT_KEYS = ['speed', 'shooting', 'passing', 'dribbling', 'defense', 'physical', 'gkReflexes'];
 
 /**
- * JSON 컬럼 값이 문자열이면 파싱하고, 이미 객체면 그대로 반환합니다.
+ * JSON 컬럼 값이 문자열이면 파싱하고, 이미 객체면 그대로 반환.
  * @param {string|Object|Array|null|undefined} value
  * @param {Object|Array} fallback 값이 비어 있을 때 사용할 기본값
  * @returns {Object|Array}
@@ -15,8 +15,8 @@ function parseJson(value, fallback) {
 }
 
 /**
- * DB Row 를 받아 경기 시뮬레이션에서 사용하는 선수 도메인 객체로 변환합니다.
- * 쿼리 alias(camelCase)와 snake_case Row 를 모두 허용합니다.
+ * DB Row 를 받아 경기 시뮬레이션에서 사용하는 선수 도메인 객체로 변환.
+ * 쿼리 alias(camelCase)와 snake_case Row 를 모두 허용.
  */
 export default class PlayerModel {
   /**
@@ -56,7 +56,7 @@ export default class PlayerModel {
 
   /**
    * 레벨 비례 성장 공식(multiplier = 1 + (level - 1) * 0.02)을 적용해
-   * 소수점 첫째 자리까지 보존한 effectiveStats 를 초기화합니다.
+   * 소수점 첫째 자리까지 보존한 effectiveStats 를 초기화.
    * @returns {Object<string, number>} 초기화된 effectiveStats
    */
   calculateInitialEffectiveStats() {
@@ -71,7 +71,7 @@ export default class PlayerModel {
   }
 
   /**
-   * 현재 체력을 반영한 실시간 전투 능력치를 반환합니다.
+   * 현재 체력을 반영한 실시간 전투 능력치를 반환.
    * 체력이 임계치(30) 이하이면 staminaFactor = 0.5 + currentStamina / 60, 초과이면 1.0.
    * @returns {Object<string, number>} speed/shooting/passing/dribbling/defense/physical/gkReflexes
    */

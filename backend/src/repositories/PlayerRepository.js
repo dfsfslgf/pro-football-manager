@@ -31,7 +31,7 @@ const DUMMY_COMPOSITION = [
  */
 export default class PlayerRepository {
   /**
-   * 가챠 후보군을 조회합니다.
+   * 가챠 후보군을 조회.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {string|string[]|null} [positionFilter] GK|DF|MF|FW 또는 그 배열. null 이면 전체 풀.
    * @returns {Promise<Array<{id:number, name:string, mainPosition:string, preferredRole:string, dropWeight:number, baseStats:Object, tags:Array}>>}
@@ -52,7 +52,7 @@ export default class PlayerRepository {
   }
 
   /**
-   * 유저 보유 선수 수를 반환합니다.
+   * 유저 보유 선수 수를 반환.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<number>}
@@ -64,7 +64,7 @@ export default class PlayerRepository {
   }
 
   /**
-   * 유저 인벤토리에 선수를 지급합니다.
+   * 유저 인벤토리에 선수를 지급.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {{userId:number, playerId:number}} params
    * @returns {Promise<number>} 생성된 user_players id
@@ -76,8 +76,8 @@ export default class PlayerRepository {
   }
 
   /**
-   * 구단 스쿼드(최대 18명)를 PlayerModel 배열로 반환합니다.
-   * 보유 선수가 11명 미만이면 시뮬레이션이 멈추지 않도록 기본 더미 18명으로 대체합니다.
+   * 구단 스쿼드(최대 18명)를 PlayerModel 배열로 반환.
+   * 보유 선수가 11명 미만이면 시뮬레이션이 멈추지 않도록 기본 더미 18명으로 대체.
    * @param {import('mysql2/promise').PoolConnection|null} conn
    * @param {number} userId
    * @returns {Promise<PlayerModel[]>}
@@ -92,7 +92,7 @@ export default class PlayerRepository {
   }
 
   /**
-   * 포지션별 기본 더미 선수 18명을 생성합니다. (userPlayerId/playerId 는 음수로 실제 데이터와 구분)
+   * 포지션별 기본 더미 선수 18명을 생성. (userPlayerId/playerId 는 음수로 실제 데이터와 구분)
    * @returns {PlayerModel[]}
    */
   static createDummySquad() {

@@ -526,8 +526,8 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
   const shooterTech = shooter.baseStats?.dribbling || 74;
   const shooterSpeed = shooter.baseStats?.speed || 75;
 
-  // 1. 능력치 비교 기반 수비수 슈팅 블로킹 판정:
-  //    슈터 앞(거리 5.2 이내)에 있는 수비수의 (defense + physical) 대 슈터의 (dribbling + speed)를 비교!
+  // 능력치 비교 기반 수비수 슈팅 블로킹 판정:
+  // 공격수 앞(거리 5.2 이내)에 있는 수비수의 수비력 + 피지컬 vs 공격수의 드리블 + 스피드를 비교
   const frontBlockers = nearbyDefenders.filter(
     (d) => distance(d, shooter) <= 5.2 && (isHome ? d.x >= shooter.x - 1.5 : d.x <= shooter.x + 1.5)
   );
@@ -537,7 +537,7 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
     )[0];
     const defPower = (bestBlocker.baseStats?.defense || 75) * 0.65 + (bestBlocker.baseStats?.physical || 75) * 0.35;
     const attRelease = shooterTech * 0.55 + shooterSpeed * 0.45;
-    // 수비 능력이 공격수보다 높을수록 블로킹 확률이 최대 62%까지 상승! (능력치 기반 슈팅 억제)
+    // 수비 능력이 공격수보다 높을수록 블로킹 확률이 최대 62%까지 상승 (능력치 기반 슈팅 억제)
     const blockProb = clamp(((defPower - attRelease + 25) / 80) * 0.65, 0.15, 0.62);
 
     if (Math.random() < blockProb) {
@@ -739,7 +739,7 @@ function executePassToPlayer(engine, carrier, target, state, now, isKillerThroug
   const fromFlank = carrier.y < 24 || carrier.y > 76;
 
   // [공중볼(Aerial Ball) 판정]
-  // 문전으로 날아오는 크로스/롱볼이거나 거리 22 이상의 롱패스, 골키퍼 킥은 공중으로 띄워서 날아갑니다!
+  // 문전으로 날아오는 크로스/롱볼이거나 거리 22 이상의 롱패스, 골킥은 공중볼로 판정
   const isAerialBall = isGkKick || passDist >= 22 || (intoBox && (fromFlank || passDist >= 15));
 
   ball.mode = 'PASS';
@@ -789,7 +789,6 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
   for (const mate of mates) {
     if (ball.lastPasserUid && mate.uid === ball.lastPasserUid && mates.length > 2) continue;
 
-    // 3톱끼리 상대 진영에서 쓸데없이 패스를 주고받으며 시간을 끄는 현상 차단 (측면 크로스 상황만 예외)
     const mateIsAttacker = ATTACKER_ROLES.includes(mate.slotRoleCode);
     const ownerOnExtremeWing = owner.y < 18 || owner.y > 82;
     if (inAttackingHalf && carrierIsAttacker && mateIsAttacker && !ownerOnExtremeWing) {
@@ -797,7 +796,7 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
     }
 
     const dist = distance(mate, owner);
-    // 패스 능력치(ownerPassStat)가 높은 선수일수록 더 먼 거리의 롱패스/전환 패스를 정확히 찔러줄 수 있음!
+    // 패스 능력치가 높은 선수일수록 더 먼 거리의 롱패스/전환 패스를 정확히 찔러줄 수 있음
     const maxRange = 36 + Math.max(0, ownerPassStat - 70) * 0.7;
     if (dist < 6 || dist > maxRange) continue;
 
@@ -835,12 +834,6 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
   return best;
 }
 
-/**
- * [능력치 기반 볼 운반 & 슈팅 결정]
- * - 고정된 슈팅 쿨다운을 제거하여, 공격진 능력치가 뛰어나 수비를 제치고 문전(홈 X>=72, 원정 X<=28)에 진입하면
- *   언제든 즉시 슈팅을 때릴 수 있습니다!
- * - 반대로 수비진의 능력치가 높으면 문전에 도달하기 전에 태클/인터셉트/헤딩 커팅에 막혀 슈팅 횟수가 자연스럽게 줄어듭니다.
- */
 function handleCarrierDecision(engine, carrier, state, now) {
   const ball = engine.ball;
   const all = [...engine.agents.values()];
@@ -851,7 +844,7 @@ function handleCarrierDecision(engine, carrier, state, now) {
 
   ball.holdFrames = (ball.holdFrames || 0) + 1;
 
-  // 1. 골키퍼 빌드업 또는 롱킥
+  // 골키퍼 빌드업 또는 롱킥
   if (carrier.role === 'GK' || carrier.roleCode === 'GK') {
     const enemySide = isHome ? 'AWAY' : 'HOME';
     pushAttackersAwayFromKeeper(engine, enemySide);
@@ -875,8 +868,8 @@ function handleCarrierDecision(engine, carrier, state, now) {
     return;
   }
 
-  // 2. 문전 슈팅 구역 (홈 X >= 72, 원정 X <= 28, 또는 골대 거리 25 이내) 진입 시:
-  //    측면 끝(크로스 구역)이면 문전으로 공중볼 크로스를 올리고, 중앙이면 패스 미루지 않고 즉시 슈팅!
+  // 문전 슈팅 구역 (홈 X >= 72, 원정 X <= 28, 또는 골대 거리 25 이내) 진입 시:
+  // 측면 끝(크로스 구역)이면 문전으로 공중볼 크로스를 올리고, 중앙이면 패스 미루지 않고 즉시 슈팅
   const inBox = (isHome ? carrier.x >= 72 : carrier.x <= 28) || distToGoal <= 25;
   if (inBox && !engine.bannerActive) {
     const onExtremeWing = carrier.y < 17 || carrier.y > 83;
@@ -900,7 +893,7 @@ function handleCarrierDecision(engine, carrier, state, now) {
     return;
   }
 
-  // 3. 공 탈취 직후 빠른 역습 패스
+  // 공 탈취 직후 빠른 역습 패스
   if (ball.mustPassAfterSteal && ball.holdFrames >= 4) {
     const teamObj = isHome ? state.homeTeam : state.awayTeam;
     const target = selectBestPassTarget(engine, carrier, teamObj?.tactics?.passingStyle || 'DIRECT_LONG', ball, false);
@@ -911,7 +904,7 @@ function handleCarrierDecision(engine, carrier, state, now) {
     ball.mustPassAfterSteal = false;
   }
 
-  // 4. 포지션별 과감한 전진 드리블 돌파
+  // 포지션별 과감한 전진 드리블 돌파
   const isWinger = WINGER_ROLES.includes(carrier.slotRoleCode);
   const isAttacker = ATTACKER_ROLES.includes(carrier.slotRoleCode);
 
@@ -922,13 +915,13 @@ function handleCarrierDecision(engine, carrier, state, now) {
   } else if (isAttacker) {
     carrier.targetX = isHome ? 79 : 21;
     carrier.targetY = carrier.y + (50 - carrier.y) * 0.38;
-    return; // 스트라이커는 옆으로 패스하지 않고 직접 수비 라인을 향해 돌파 시도!
+    return; 
   } else {
     carrier.targetX = clamp(carrier.x + dir * 20, 18, 76);
     carrier.targetY = carrier.y + (50 - carrier.y) * 0.2;
   }
 
-  // 5. 미드필더의 아크 정면 중거리 슛 (슈팅 능력치가 높을수록 더 자주 위협적인 중거리 슛 시도!)
+  // 미드필더의 아크 정면 중거리 슛
   const isMidfielder = MIDFIELDER_ROLES.includes(carrier.slotRoleCode);
   const inMidShootZone = isHome ? carrier.x >= 60 && carrier.x < 72 : carrier.x <= 40 && carrier.x > 28;
   if (isMidfielder && inMidShootZone && ball.holdFrames >= 9 && !engine.bannerActive) {
@@ -940,7 +933,7 @@ function handleCarrierDecision(engine, carrier, state, now) {
     }
   }
 
-  // 6. 전방 침투 스루패스 / 크로스 연결
+  // 전방 침투 스루패스 / 크로스 연결
   const holdLimit = carrier.role === 'DF' ? 8 : 14;
   if (ball.holdFrames >= holdLimit) {
     const teamObj = isHome ? state.homeTeam : state.awayTeam;
@@ -988,7 +981,7 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   const isAggressivePress = defTeamObj?.tactics?.pressing === 'GEGENPRESS' || defTeamObj?.tactics?.pressing === 'HIGH';
   const effectiveDefPressure = defStat + (isAggressivePress ? 6 : 0);
 
-  // 미드필더의 패스 능력치가 수비 압박보다 높으면 유연하게 탈압박 패스 성공!
+  // 미드필더의 패스 능력치가 수비 압박보다 높으면 유연하게 탈압박 패스 성공
   if (MIDFIELDER_ROLES.includes(owner.slotRoleCode)) {
     const escapeTarget = selectBestPassTarget(engine, owner, 'DIRECT_LONG', ball, true);
     const passAdvantage = (passStat - effectiveDefPressure) * 0.02;
@@ -1011,9 +1004,8 @@ function resolveOneOnOneDuel(engine, owner, chaser, state, now) {
   const isFromBehind = relativeX < -1.8;
   const alreadyBooked = (chaser.yellowCards || 0) >= 1;
 
-  // [100% 능력치 격차 기반 태클 성공률]
-  // 수비수의 defStat과 공격수의 dribStat 차이를 직접 반영하여,
-  // 수비수가 강하면 75% 확률로 뺏어내고, 공격수가 월드클래스(예: OVR 90 vs 수비 70)이면 80% 확률로 수비를 뚫고 지나갑니다!
+  // 수비수의 수비 능력치와 공격수의 드리블 능력치 차이를 직접 반영하여,
+  // 수비수가 강하면 75% 확률로 뺏어내고, 공격수가 월드클래스(예: OVR 90 vs 수비 70)이면 80% 확률로 돌파 성공
   const statDiff = effectiveDefPressure - dribStat;
   const cleanStealProb = clamp(0.50 + statDiff * 0.018 - (isFromBehind ? 0.1 : 0), 0.18, 0.78);
   const foulOnTackleProb = alreadyBooked ? 0.008 : isFromBehind ? 0.045 : 0.018;
@@ -1231,9 +1223,7 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
       ball.z = 0;
     }
 
-    // 1) [공중볼(크로스/롱패스) 수비수·미드필더 점프 헤딩 커팅 판정!]
-    //    공중볼이 낙하 지점 근처(비행 진행률 65% 이상 또는 리시버까지 거리 7.5 이내)에 내려올 때,
-    //    주변의 수비수/미드필더가 달려들어 공격수와 점프 헤딩 경합(physical + defense)을 벌입니다!
+    // 공중볼(크로스/롱패스) 수비수, 미드필더 점프 헤딩 커팅 판정
     if (ball.isAerial && !ball.aerialContestResolved && (flightProgress >= 0.65 || remainDist <= 7.5)) {
       const aerialDefenders = activePlayers
         .filter(
@@ -1261,7 +1251,7 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
         receiver.jumpUntil = now + 520;
 
         if (Math.random() < headerWinProb) {
-          // 수비수/미드필더가 점프 헤딩 커팅 승리! -> 전방 아군 미드필더 쪽으로 머리로 강하게 받아쳐 클리어링!
+          // 수비수/미드필더가 점프 헤딩 커팅 승리 -> 전방 아군 미드필더 쪽으로 머리로 강하게 받아쳐 클리어링
           const passer = ball.lastPasserUid ? getAgentByUid(engine, ball.lastPasserUid) : null;
           const isInBox = defender.team === 'HOME' ? ball.x <= 32 : ball.x >= 68;
 
@@ -1293,7 +1283,7 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
             store.recordCanvasTackle(defender.team, defender.slotIndex);
           }
 
-          // 헤딩으로 걷어낸 공을 전방의 아군 미드필더/공격수에게 즉시 연결!
+          // 헤딩으로 걷어낸 공을 전방의 아군 미드필더/공격수에게 즉시 연결
           const clearDir = defender.team === 'HOME' ? 1 : -1;
           const clearMates = activePlayers
             .filter(
@@ -1338,7 +1328,7 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
       }
     }
 
-    // 2) 낮게 깔려가는 땅볼 패스(isAerial === false)일 때 수비수/미드필더의 발밑 인터셉트 판정
+    // 낮게 깔려가는 땅볼 패스(isAerial === false)일 때 수비수/미드필더의 발밑 인터셉트 판정
     if (!ball.isAerial && !ball.isGkClearance) {
       const interceptors = activePlayers
         .filter(
@@ -1577,7 +1567,7 @@ function movePlayerSmooth(engine, player, playbackSpeed, isSprinting, weatherSpe
   const actualMoved = Math.hypot(player.vx, player.vy);
   player.distanceMoved = (player.distanceMoved || 0) + actualMoved;
 
-  // 스토어 기본 체력 감소 + 실제 이동 거리 및 스프린트 여부에 따른 차등 체력 감소 합산!
+  // 스토어 기본 체력 감소 + 실제 이동 거리 및 스프린트 여부에 따른 차등 체력 감소 합산
   if (player.role !== 'GK' && actualMoved > 0.12) {
     const sprintFactor = isSprinting || player.isOverlapping || player.isMakingRun ? 1.65 : 0.45;
     const extraMoveDrain = actualMoved * 0.0055 * sprintFactor;
@@ -1585,9 +1575,6 @@ function movePlayerSmooth(engine, player, playbackSpeed, isSprinting, weatherSpe
   }
 }
 
-/**
- * [수비 뒷공간 사수(Deep Cover) + 침투 공격수 1:1 마킹 + 공중볼 낙하지점 선점]
- */
 function updatePlayerPositions(engine, state, playbackSpeed, now) {
   const { ball, agents } = engine;
   const all = [...agents.values()];
@@ -1606,7 +1593,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
   const attackingTeam = owner ? owner.team : ball.x < 50 ? 'AWAY' : 'HOME';
   const defendingTeam = attackingTeam === 'HOME' ? 'AWAY' : 'HOME';
 
-  // 1. 볼 보유자를 향해 달려드는 수비팀 압박자 (제1 압박자 + 제2 중원 압박자)
+  // 볼 보유자를 향해 달려드는 수비팀 압박자
   const defCandidates = ownerIsGk
     ? []
     : active
@@ -1625,7 +1612,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
     }
   }
 
-  // 2. 수비수(DF)와 수비형 미드필더(CDM)에게 침투하는 상대 공격수 1:1 대인 마킹 할당 (뒷공간 뚫림 원천 차단!)
+  // 수비수(DF)와 수비형 미드필더(CDM)에게 침투하는 상대 공격수 1:1 대인 마킹 할당 
   const enemyAttackers = active.filter(
     (p) => p.team === attackingTeam && (ATTACKER_ROLES.includes(p.slotRoleCode) || p.slotRoleCode === 'CAM')
   );
@@ -1687,7 +1674,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       (p.role === 'DF' || MIDFIELDER_ROLES.includes(p.slotRoleCode)) &&
       Math.hypot(ball.targetX - p.x, ball.targetY - p.y) <= 16
     ) {
-      // [공중볼 헤딩 커팅 준비] 문전이나 중원으로 공중볼이 날아오면 근처 수비수/미드필더가 낙하지점으로 빠르게 이동!
+      // 문전이나 중원으로 공중볼이 날아오면 근처 수비수/미드필더가 낙하지점으로 빠르게 이동
       p.targetX = ball.targetX;
       p.targetY = ball.targetY;
       p.isPressing = true;
@@ -1699,7 +1686,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       p.targetX = ball.x + (goalX - ball.x) * 0.18;
       p.targetY = clamp(ball.y + (p.baseY < ball.y ? -5 : 5), 10, 90);
     } else if (!isMyTeamAttacking && p.markingTargetUid) {
-      // [뒷공간 방어 핵심] 침투하는 상대 공격수보다 항상 우리 골문 쪽으로 3.5m 더 깊숙이 위치(Goal-side Shadow Marking)하여 뒷공간 완벽 차단!
+      // 침투하는 상대 공격수보다 항상 우리 골문 쪽으로 3.5m 더 깊숙이 위치하여 뒷공간 차단
       const markTarget = getAgentByUid(engine, p.markingTargetUid);
       if (markTarget) {
         const goalSideOffset = p.team === 'HOME' ? -3.8 : 3.8;
@@ -1726,7 +1713,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
         p.targetX = p.team === 'HOME' ? clamp(Math.max(ball.x + 10, 66), 52, 76) : clamp(Math.min(ball.x - 10, 34), 24, 48);
         p.targetY = p.baseY < 50 ? 9 : 91;
       } else if (CENTERBACK_ROLES.includes(p.slotRoleCode)) {
-        // 센터백(CB)은 공격 시에도 하프라인 너머로 올라가지 않고 뒷공간(HOME: 최대 36, AWAY: 최소 64)을 철저히 사수!
+        // 센터백(CB)은 공격 시에도 하프라인 너머로 올라가지 않고 뒷공간을 철저히 사수
         const cbPush = isMyTeamAttacking ? 6 * dir : -6 * dir;
         const rawCbX = p.baseX + teamShiftX * 0.55 + cbPush;
         p.targetX = p.team === 'HOME' ? clamp(rawCbX, 14, 36) : clamp(rawCbX, 64, 86);
@@ -1759,7 +1746,7 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
           p.targetY = clamp(p.baseY + teamShiftY + (ball.y - p.baseY) * 0.22, 14, 86);
         }
       } else {
-        // 스트라이커(ST)
+        // 스트라이커(ST)는 공격 시 전방으로 적극적으로 침투하며 상대 수비 뒷공간을 공략  
         p.isMakingRun = isMyTeamAttacking;
         const strikerPush = isMyTeamAttacking ? 12 * dir : -6 * dir;
         p.targetX = clamp(p.baseX + teamShiftX + strikerPush + individualWaveX, 22, 80);

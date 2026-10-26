@@ -2,9 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
- * MySQL 설치 없이 바로 플레이할 수 있는 데모 모드. (npm run demo)
- * mysql-memory-server 로 임시 MySQL 을 띄우고 스키마/시드를 적용한 뒤 API 서버를 시작합니다.
- * 서버를 종료하면 데이터도 사라집니다. 최초 실행 시 MySQL 바이너리 다운로드로 시간이 걸릴 수 있습니다.
+ * MySQL 설치 없이 바로 플레이할 수 있는 데모 모드
  * @returns {Promise<void>}
  */
 async function main() {

@@ -1,10 +1,6 @@
 import { effectiveStats, computeOverall, rarityFromWeight } from './playerMath.js';
 
-/**
- * [요구사항 3 & 5번 해결]
- * secondary_role 컬럼에 "LB,RB,CB" 처럼 여러 포지션이 쉼표로 저장되어 있어도
- * 모두 배열로 분리하여 roleCodes 에 포함시킵니다.
- */
+
 export function toPlayerDto(p) {
   const secondaryList = String(p.secondaryRole || '')
     .split(',')

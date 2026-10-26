@@ -6,7 +6,6 @@ import RarityBadge from '../components/common/RarityBadge.jsx';
 import StatRadar from '../components/common/StatRadar.jsx';
 import { POSITION_LABELS } from '../constants/gameConfig.js';
 
-// [요구사항 8번 해결] 알파벳순(DF-FW-GK-MF) 꼬임을 방지하는 축구 표준 포지션 순서 가중치
 const POSITION_ORDER_WEIGHT = { FW: 1, MF: 2, DF: 3, GK: 4 };
 
 const FIELD_COLUMNS = [

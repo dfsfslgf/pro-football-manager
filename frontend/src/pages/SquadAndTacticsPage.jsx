@@ -51,14 +51,14 @@ export default function SquadAndTacticsPage() {
     setNotice({ type: 'success', text: '🔄 서버에 마지막으로 저장된 라인업과 후보를 다시 불러왔습니다.' });
   };
 
-  // [요구사항 7번 해결] 후보 11명 자동완성 후 즉시 서버에도 자동 저장!
+  // 후보 11명 자동완성
   const handleAutoBench = async () => {
     const res = autoFillBench();
     await useSquadStore.getState().saveSquad();
     setNotice({ type: 'success', text: `${res.message} (자동 저장 완료)` });
   };
 
-  // [요구사항 7번 해결] 선발 11명 + 후보 11명 전체 자동완성 후 즉시 서버에 자동 저장!
+  // 선발 11명 + 후보 11명 전체 자동완성
   const handleAutoAll = async () => {
     const res = autoFillAll();
     await useSquadStore.getState().saveSquad();

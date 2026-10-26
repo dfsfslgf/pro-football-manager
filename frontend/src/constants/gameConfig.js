@@ -1,6 +1,3 @@
-/**
- * 프론트엔드 전용 게임 표시/규칙 상수. 서버(backend/src/constants/clubRules.js, competitionRules.js)와 값이 일치해야 합니다.
- */
 
 export const EMBLEM_ICONS = ['🦁', '🐺', '🦅', '🐉', '⚡', '🔥', '🛡️', '⭐', '👑', '🐯', '🦈', '🌊'];
 export const EMBLEM_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#ca8a04', '#9333ea', '#0891b2', '#ea580c', '#475569'];
@@ -59,7 +56,7 @@ export const OUTCOME_META = Object.freeze({
 });
 
 /**
- * 숫자를 천 단위 구분 문자열로 변환합니다.
+ * 숫자를 천 단위 구분 문자열로 변환
  * @param {number|null|undefined} value
  * @returns {string}
  */

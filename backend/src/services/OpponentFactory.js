@@ -19,7 +19,7 @@ const SLOT_TO_ROLE = {
   RAM: 'RW',
 };
 
-// [요구사항 14번 반영] 상대 팀 후보(벤치)도 11명 풀 엔트리(GK 1, DF 4, MF 4, FW 2)로 구성
+// 상대 팀 후보(벤치)도 11명 풀 엔트리(GK 1, DF 4, MF 4, FW 2)로 구성
 const BENCH_PLAN = [
   ['GK', 'GK'],
   ['DF', 'LB'],
@@ -34,10 +34,6 @@ const BENCH_PLAN = [
   ['FW', 'ST'],
 ];
 
-/**
- * crawlRealPlayers.js 가 생성한 real_players_by_team.json 이 있으면 메모리에 로드하여
- * 146개 전 구단의 실제 포지션별 선수 로스터로 즉시 활용합니다!
- */
 let CRAWLED_TEAM_ROSTERS = {};
 try {
   const jsonPath = path.resolve(process.cwd(), 'real_players_by_team.json');
@@ -95,7 +91,7 @@ const BUILTIN_CLUB_SQUADS = {
 };
 
 /**
- * [요구사항 3번 완벽 보장] 포지션별 글로벌 실제 선수 풀 (GK 풀에는 오직 실제 골키퍼만 존재!)
+ * 포지션별 글로벌 실제 선수 풀
  */
 const GLOBAL_REAL_POOL_BY_POS = {
   GK: [
@@ -145,7 +141,7 @@ export function buildOpponent({ seed, name, strength, formation, tactics }) {
 
   const usedNames = new Set();
 
-  // 포지션(GK / DF / MF / FW)에 100% 일치하는 선수만 선택 (GK에 필드 플레이어가 배정되는 현상 원천 차단!)
+  // 포지션(GK / DF / MF / FW)에 100% 일치하는 선수만 선택 
   const pickUniqueRealName = (position) => {
     const strictPos = ['GK', 'DF', 'MF', 'FW'].includes(position) ? position : 'MF';
     const primaryPool = customSquad?.[strictPos] || [];

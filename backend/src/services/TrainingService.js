@@ -77,9 +77,8 @@ export default class TrainingService {
   }
 
   /**
-   * [요구사항 5번 완벽 해결]
    * 포지션 숙련도 훈련 시 기존 포지션을 지우지 않고 쉼표 구분 문자열("LB,RB,CB")로 계속 추가하여
-   * 한 선수가 여러 개의 멀티 포지션을 습득할 수 있도록 지원합니다!
+   * 한 선수가 여러 개의 멀티 포지션을 습득할 수 있도록 지원
    */
   static async trainPosition(userId, userPlayerId, roleCode) {
     return withTransaction(async (conn) => {

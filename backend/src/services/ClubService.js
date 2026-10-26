@@ -18,7 +18,7 @@ const userMarketRefreshMap = new Map();
 function generateListings(userId, date, masters, refreshCycle = 0) {
   const rng = createRng(`market:v2:${userId}:${date}:cycle_${refreshCycle}`);
   const shuffled = rng.shuffle([...masters]);
-  // 새로고침 횟수에 따라 완전히 다른 슬라이스 구간을 추출하여 이전 매물과 겹치지 않게 보장!
+  // 새로고침 횟수에 따라 완전히 다른 슬라이스 구간을 추출하여 이전 매물과 겹치지 않게 보장.
   const total = Math.max(1, shuffled.length);
   const startOffset = (refreshCycle * MARKET.LISTING_COUNT) % total;
   const picked = [];
@@ -43,8 +43,8 @@ function generateListings(userId, date, masters, refreshCycle = 0) {
 }
 
 /**
- * [요구사항 9번 완벽 해결]
- * 업적 단계를 수령(claimed)하면 거기서 끝나지 않고, 자동으로 다음 단계(1단계 -> 2단계 -> 3단계 ... -> N단계 무한 확장)가 생성됩니다!
+ * 업적 단계 수령 후 자동으로 다음 단계가 생성되는 체인 업적 시스템
+ * 업적 단계를 수령(claimed)하면 거기서 끝나지 않고, 자동으로 다음 단계(1단계 -> 2단계 -> 3단계 ... -> N단계 무한 확장)가 생성.
  */
 const CHAIN_ACHIEVEMENT_LINES = [
   {
@@ -92,7 +92,7 @@ const CHAIN_ACHIEVEMENT_LINES = [
 function buildEndlessAchievements(metrics, claimedSet) {
   const list = [];
   for (const line of CHAIN_ACHIEVEMENT_LINES) {
-    // 현재 라인에서 아직 수령하지 않은 가장 낮은 단계(Stage)부터 연속 2개 단계를 노출 (수령 즉시 다음 단계가 자동 등장!)
+    // 현재 라인에서 아직 수령하지 않은 가장 낮은 단계 부터 연속 2개 단계를 노출 (수령 즉시 다음 단계가 자동 등장)
     let shownForLine = 0;
     for (let stage = 1; stage <= 999; stage++) {
       const idx = stage - 1;
@@ -172,7 +172,7 @@ export default class ClubService {
   }
 
   /**
-   * [요구사항 10번 해결] getMarket 호출 시마다 refreshCycle을 증가시켜 매물 새로고침 클릭 시 8명 전원이 완전히 새로운 선수로 교체!
+   * 매물 새로고침 시 8명 전원이 완전히 새로운 선수로 교체되도록 getMarket 호출 시마다 refreshCycle을 증가.
    */
   static async getMarket(userId) {
     const date = todayKey();

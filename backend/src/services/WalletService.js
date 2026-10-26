@@ -1,12 +1,10 @@
 import { InsufficientFundsError } from '../constants/errorCodes.js';
 import WalletRepository from '../repositories/WalletRepository.js';
 
-/**
- * 지갑 변동 + 재화 로그 기록 헬퍼. 호출자가 연 트랜잭션(conn)과 FOR UPDATE 로 잠근 wallet 객체를 전달해야 합니다.
- */
+
 export default class WalletService {
   /**
-   * 골드를 차감하고 SPEND 로그를 남깁니다.
+   * 골드를 차감하고 SPEND 로그를 남김.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {{userId:number, cashPaid:number, cashFree:number, gold:number}} wallet
    * @param {number} amount

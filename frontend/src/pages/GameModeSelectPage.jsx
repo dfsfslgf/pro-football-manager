@@ -21,12 +21,6 @@ const WORLD_CUP_NATIONS = [
   { code: 'USA', name: '🇺🇸 미국', emblem: '🦅', ovr: 81, stars: ['크리스티안 풀리식 (LW · 83)', '웨스턴 맥케니 (CM · 80)', '안토니 로빈슨 (LB · 81)'] },
 ];
 
-/**
- * [요구사항 11번 완벽 해결]
- * 마커스 래시포드 / 브루노 기마랑이스 / 크리스티안 로메로가 고정으로 나오던 문제를 해결하기 위해,
- * 구단별 실제 핵심 선수 사전을 대폭 확충하고, 사전에 없는 구단도 구단명 고유 시드(Hash)로
- * 매번 그 구단만의 고유한 포메이션·전술·핵심 선수 4명을 생성합니다!
- */
 const CLUB_KEY_PLAYERS_MAP = {
   '맨체스터 블루': { formation: '4-2-3-1', style: '게겐프레싱 & 포제션', keyPlayers: ['엘링 홀란드 (ST · 92)', '케빈 더 브라위너 (CAM · 91)', '로드리 (CDM · 91)', '후벵 디아스 (CB · 89)'] },
   '노스 런던 레드': { formation: '4-3-3', style: '아르테타식 하이브리드 압박', keyPlayers: ['부카요 사카 (RW · 88)', '마르틴 외데고르 (CAM · 89)', '데클란 라이스 (CDM · 88)', '윌리엄 살리바 (CB · 89)'] },
@@ -69,7 +63,7 @@ function getOpponentScoutInfo(teamObjOrName) {
   const name = typeof teamObjOrName === 'string' ? teamObjOrName : teamObjOrName?.name || '상대 구단';
   const strength = Math.round(teamObjOrName?.strength || teamObjOrName?.avgOvr || 80);
 
-  // 1) 정확히 매칭되는 구단 사전 확인
+  // 정확히 매칭되는 구단 사전 확인
   const exactKey = Object.keys(CLUB_KEY_PLAYERS_MAP).find((k) => name.includes(k) || k.includes(name));
   if (exactKey) {
     const info = CLUB_KEY_PLAYERS_MAP[exactKey];
@@ -83,7 +77,6 @@ function getOpponentScoutInfo(teamObjOrName) {
     };
   }
 
-  // 2) 사전에 없는 구단은 구단 이름 해시(Hash)를 기반으로 그 구단만의 고유한 핵심 선수 4명을 결정론적으로 생성! (절대 고정 3명이 나오지 않음)
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
 

@@ -1,12 +1,10 @@
 /**
- * [9대 리그 146개 전 구단 실제 스쿼드(3,000~4,500명+) 정밀 크롤러 v3]
- * - TheSportsDB의 Cloudflare 1015 차단 문제를 완벽히 우회하는 Wikipedia MediaWiki API 기반 크롤러
- * - 유명 선수(벤 화이트, 트렌트 알렉산더아놀드 등) 위키 문서명 자동 매핑 및 redirects=1 지원으로 사진 누락 해결
+ * - Wikipedia MediaWiki API 기반 크롤러
  * - 선수별 실제 포지션 사전 + 등번호(Back Number) 분석으로 정확한 세부 포지션(CB/LB/RB, CDM/CM/CAM, LW/RW/ST) 할당
  *
  * 실행 방법:
- *   1) JSON만 생성: node src/scripts/crawlRealPlayers.js
- *   2) JSON 생성 + MySQL DB(player_master) 전수 저장: node src/scripts/crawlRealPlayers.js --db
+ *   JSON만 생성: node src/scripts/crawlRealPlayers.js
+ *   JSON 생성 + MySQL DB(player_master) 전수 저장: node src/scripts/crawlRealPlayers.js --db
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -19,9 +17,7 @@ const WIKI_HEADERS = {
 };
 
 /**
- * [요구사항 3 & 4번 완벽 해결]
- * 한글/영문 주요 선수들의 정확한 실제 포지션(pos, role) 및 영문 위키피디아 문서 제목(wiki) 사전
- * -> 벤 화이트, 트렌트 알렉산더아놀드 등 동음이의어나 하이픈 문서도 100% 실제 프로필 사진을 가져옵니다.
+ * 한글/영문 주요 선수들의 정확한 실제 포지션 및 영문 위키피디아 문서 제목 사전
  */
 const EXACT_PLAYER_META = {
   // 골키퍼 (GK)
@@ -86,7 +82,7 @@ const EXACT_PLAYER_META = {
   '김영권': { pos: 'DF', role: 'CB', wiki: 'Kim_Young-gwon' },
   '김진수': { pos: 'DF', role: 'LB', wiki: 'Kim_Jin-su' },
 
-  // 미드필더 (MF - CDM / CM / CAM 명확히 구분, 절대 풀백으로 가지 않음)
+  // 미드필더 (MF - CDM / CM / CAM 명확히 구분)
   '로드리': { pos: 'MF', role: 'CDM', wiki: 'Rodri_(footballer,_born_1996)' },
   'Rodri': { pos: 'MF', role: 'CDM', wiki: 'Rodri_(footballer,_born_1996)' },
   '케빈 더 브라위너': { pos: 'MF', role: 'CAM', wiki: 'Kevin_De_Bruyne' },
@@ -370,10 +366,7 @@ const LEAGUE_CLUBS_WIKI = [
 ];
 
 /**
- * [요구사항 3번 해결]
- * 미드필더가 레프트백으로 가거나 센터백이 윙어로 가는 현상을 원천 방지하기 위해
- * 1차: EXACT_PLAYER_META 사전 확인
- * 2차: 주포지션(GK/DF/MF/FW)과 등번호(shirtNo) 기반 축구 표준 포지션 추론
+ * 포지션 추론 함수
  */
 function inferAccurateRole(rawName, mainPos, shirtNo = 0, idx = 0) {
   const exact = EXACT_PLAYER_META[rawName];
@@ -476,11 +469,6 @@ async function fetchSquadFromWikipedia(wikiPageTitle, safeClub, realClub, league
   }
 }
 
-/**
- * [요구사항 4번 완벽 해결]
- * MediaWiki PageImages API 호출 시 &redirects=1 을 포함하여 리다이렉트된 문서(예: Ben White -> Ben White (footballer))의
- * 썸네일도 정확히 추적해서 매핑합니다.
- */
 async function attachPlayerImagesInBatches(players) {
   const withWiki = players.filter((p) => p.wikiTitle);
   const batchSize = 40;
@@ -552,11 +540,11 @@ async function attachPlayerImagesInBatches(players) {
 
 export async function runPlayerCrawler() {
   const shouldSyncDb = process.argv.includes('--db');
-  console.log('⚽ 9대 리그 전 구단(146개 팀) 실제 소속 선수단 정밀 크롤링 시작...');
+  console.log('⚽ 9대 리그 전 구단(146개 팀) 실제 소속 선수단 크롤링 시작...');
 
   const allPlayers = [];
 
-  // 1) 한글 주요 스타 선수 120명 기본 시드 (EXACT_PLAYER_META를 통해 정확한 포지션 & 영문 위키 사진 타이틀 자동 연결!)
+  // 한글 주요 스타 선수 120명 기본 시드 (EXACT_PLAYER_META를 통해 정확한 포지션 & 영문 위키 사진 타이틀 자동 연결)
   REAL_PLAYER_MASTER_CATALOG.forEach((item, idx) => {
     const exact = EXACT_PLAYER_META[item.name];
     const finalPos = exact?.pos || item.pos;

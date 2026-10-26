@@ -13,7 +13,7 @@ export function effectiveStats(baseStats, level) {
 }
 
 /**
- * 주 포지션 기준 종합 능력치(OVR). 프론트엔드 getOverall 과 동일한 가중치입니다.
+ * 주 포지션 기준 종합 능력치(OVR).
  * @param {Object<string, number>} baseStats
  * @param {number} level
  * @param {'GK'|'DF'|'MF'|'FW'} position
@@ -34,7 +34,7 @@ export function computeOverall(baseStats, level, position) {
 }
 
 /**
- * 가챠 가중치로 희귀도 등급을 결정합니다.
+ * 가챠 가중치로 희귀도 등급을 결정.
  * @param {number} dropWeight
  * @returns {'LEGEND'|'EPIC'|'RARE'|'COMMON'}
  */

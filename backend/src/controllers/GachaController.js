@@ -21,8 +21,6 @@ export default class GachaController {
   }
 
   /**
-   * POST /api/v1/scout
-   * body: { packageKey: string, count: 1|10 } — 비용은 서버 상수만 사용하며 클라이언트가 지정할 수 없습니다.
    * @param {import('express').Request} req
    * @param {import('express').Response} res
    * @param {import('express').NextFunction} next

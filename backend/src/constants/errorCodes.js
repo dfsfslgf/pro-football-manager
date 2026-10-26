@@ -1,5 +1,5 @@
 /**
- * 애플리케이션 공통 커스텀 에러. HTTP 상태 코드와 에러 코드를 함께 보유합니다.
+ * 애플리케이션 공통 커스텀 에러. HTTP 상태 코드와 에러 코드 설정
  */
 export class CustomError extends Error {
   /**
