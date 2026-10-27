@@ -41,24 +41,27 @@ export default class CompetitionController {
    * @param {import('express').NextFunction} next
    * @returns {Promise<void>}
    */
-  static async start(req, res, next) {
+static async start(req, res, next) {
     try {
-      res.status(201).json({ success: true, data: await CompetitionService.start(req.userId, req.params.mode, req.body?.restart === true) });
+      const userId = req.user?.id || req.userId;
+      const { mode } = req.params;
+      const restart = req.body?.restart ?? false;
+      const nationCode = req.body?.nationCode || null;
+      const data = await CompetitionService.start(userId, mode, { restart, nationCode });
+      res.json({ success: true, data });
     } catch (err) {
       next(err);
     }
   }
 
-  /**
-   * GET /api/v1/competitions/:mode/next-match?stageId=
-   * @param {import('express').Request} req
-   * @param {import('express').Response} res
-   * @param {import('express').NextFunction} next
-   * @returns {Promise<void>}
-   */
   static async nextMatch(req, res, next) {
     try {
-      res.json({ success: true, data: await CompetitionService.getNextMatch(req.userId, req.params.mode, req.query.stageId ?? null) });
+      const userId = req.user?.id || req.userId;
+      const { mode } = req.params;
+      const stageId = req.query?.stageId ? Number(req.query.stageId) : null;
+      const nationCode = req.query?.nationCode || null;
+      const data = await CompetitionService.nextMatch(userId, mode, stageId, nationCode);
+      res.json({ success: true, data });
     } catch (err) {
       next(err);
     }

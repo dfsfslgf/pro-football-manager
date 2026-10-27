@@ -1,5 +1,3 @@
-/** 대회 모드 규칙 상수 (2026 월드컵 48개국 체제 반영) */
-
 export const MODES = Object.freeze(['LEAGUE', 'CHAMPIONS_CUP', 'WORLD_CUP', 'CHALLENGE_TOWER', 'RANKED']);
 
 export const MODE_LABELS = Object.freeze({
@@ -137,9 +135,60 @@ export const RANKED = Object.freeze({
   WIN_REWARD: { gold: 1000, cashFree: 10 },
 });
 
-/**
- * 2026 월드컵 본선 48개국 리스트 (유저 국가를 제외한 47개국 매칭 풀 포함)
- */
+export const WORLD_CUP_NATIONS_META = Object.freeze([
+  { code: 'MEX', name: '멕시코', confed: 'CONCACAF', pot: 1, strength: 82, hostGroup: 'A' },
+  { code: 'CAN', name: '캐나다', confed: 'CONCACAF', pot: 1, strength: 80, hostGroup: 'B' },
+  { code: 'USA', name: '미국', confed: 'CONCACAF', pot: 1, strength: 83, hostGroup: 'D' },
+  { code: 'ESP', name: '스페인', confed: 'UEFA', pot: 1, strength: 91 },
+  { code: 'FRA', name: '프랑스', confed: 'UEFA', pot: 1, strength: 92 },
+  { code: 'ARG', name: '아르헨티나', confed: 'CONMEBOL', pot: 1, strength: 91 },
+  { code: 'ENG', name: '잉글랜드', confed: 'UEFA', pot: 1, strength: 91 },
+  { code: 'BRA', name: '브라질', confed: 'CONMEBOL', pot: 1, strength: 90 },
+  { code: 'GER', name: '독일', confed: 'UEFA', pot: 1, strength: 89 },
+  { code: 'POR', name: '포르투갈', confed: 'UEFA', pot: 1, strength: 89 },
+  { code: 'NED', name: '네덜란드', confed: 'UEFA', pot: 1, strength: 87 },
+  { code: 'ITA', name: '이탈리아', confed: 'UEFA', pot: 1, strength: 87 },
+
+  { code: 'BEL', name: '벨기에', confed: 'UEFA', pot: 2, strength: 86 },
+  { code: 'CRO', name: '크로아티아', confed: 'UEFA', pot: 2, strength: 85 },
+  { code: 'SUI', name: '스위스', confed: 'UEFA', pot: 2, strength: 84 },
+  { code: 'DEN', name: '덴마크', confed: 'UEFA', pot: 2, strength: 83 },
+  { code: 'AUT', name: '오스트리아', confed: 'UEFA', pot: 2, strength: 83 },
+  { code: 'TUR', name: '튀르키예', confed: 'UEFA', pot: 2, strength: 82 },
+  { code: 'URU', name: '우루과이', confed: 'CONMEBOL', pot: 2, strength: 86 },
+  { code: 'COL', name: '콜롬비아', confed: 'CONMEBOL', pot: 2, strength: 85 },
+  { code: 'KOR', name: '대한민국', confed: 'AFC', pot: 2, strength: 84 },
+  { code: 'JPN', name: '일본', confed: 'AFC', pot: 2, strength: 84 },
+  { code: 'MAR', name: '모로코', confed: 'CAF', pot: 2, strength: 84 },
+  { code: 'SEN', name: '세네갈', confed: 'CAF', pot: 2, strength: 83 },
+
+  { code: 'UKR', name: '우크라이나', confed: 'UEFA', pot: 3, strength: 81 },
+  { code: 'SWE', name: '스웨덴', confed: 'UEFA', pot: 3, strength: 81 },
+  { code: 'POL', name: '폴란드', confed: 'UEFA', pot: 3, strength: 81 },
+  { code: 'ECU', name: '에콰도르', confed: 'CONMEBOL', pot: 3, strength: 81 },
+  { code: 'PAR', name: '파라과이', confed: 'CONMEBOL', pot: 3, strength: 80 },
+  { code: 'CHI', name: '칠레', confed: 'CONMEBOL', pot: 3, strength: 79 },
+  { code: 'NGA', name: '나이지리아', confed: 'CAF', pot: 3, strength: 82 },
+  { code: 'EGY', name: '이집트', confed: 'CAF', pot: 3, strength: 81 },
+  { code: 'CIV', name: '코트디부아르', confed: 'CAF', pot: 3, strength: 81 },
+  { code: 'ALG', name: '알제리', confed: 'CAF', pot: 3, strength: 80 },
+  { code: 'IRN', name: '이란', confed: 'AFC', pot: 3, strength: 80 },
+  { code: 'AUS', name: '호주', confed: 'AFC', pot: 3, strength: 80 },
+
+  { code: 'CMR', name: '카메룬', confed: 'CAF', pot: 4, strength: 79 },
+  { code: 'GHA', name: '가나', confed: 'CAF', pot: 4, strength: 78 },
+  { code: 'TUN', name: '튀니지', confed: 'CAF', pot: 4, strength: 78 },
+  { code: 'KSA', name: '사우디아라비아', confed: 'AFC', pot: 4, strength: 78 },
+  { code: 'QAT', name: '카타르', confed: 'AFC', pot: 4, strength: 77 },
+  { code: 'UZB', name: '우즈베키스탄', confed: 'AFC', pot: 4, strength: 77 },
+  { code: 'IRQ', name: '이라크', confed: 'AFC', pot: 4, strength: 76 },
+  { code: 'CRC', name: '코스타리카', confed: 'CONCACAF', pot: 4, strength: 78 },
+  { code: 'PAN', name: '파나마', confed: 'CONCACAF', pot: 4, strength: 77 },
+  { code: 'JAM', name: '자메이카', confed: 'CONCACAF', pot: 4, strength: 76 },
+  { code: 'HON', name: '온두라스', confed: 'CONCACAF', pot: 4, strength: 75 },
+  { code: 'NZL', name: '뉴질랜드', confed: 'OFC', pot: 4, strength: 75 },
+]);
+
 export const AI_CLUB_NAMES = Object.freeze({
   LEAGUE: [
     '맨체스터 블루', '노스 런던 레드', '머지사이드 레드', '노스이스트 런던', '웨스트 런던 블루',
@@ -153,14 +202,7 @@ export const AI_CLUB_NAMES = Object.freeze({
     '카탈루냐 블루레드', '머지사이드 레드', '노스 런던 레드', '라인 레드블랙', '베스트팔렌 옐로우',
     '마드리드 로히블랑코', '밀라노 레드블랙', '피에몬테 블랙화이트', '노스이스트 런던', '나폴리 아주리',
   ],
-  WORLD_CUP: [
-    '대한민국', '아르헨티나', '프랑스', '잉글랜드', '브라질', '스페인', '독일', '포르투갈',
-    '네덜란드', '이탈리아', '크로아티아', '벨기에', '우루과이', '콜롬비아', '일본', '모로코',
-    '미국', '멕시코', '세네갈', '스위스', '덴마크', '오스트리아', '튀르키예', '우크라이나',
-    '스웨덴', '폴란드', '세르비아', '나이지리아', '이집트', '코트디부아르', '알제리', '카메룬',
-    '가나', '말리', '튀니지', '호주', '이란', '사우디아라비아', '카타르', '우즈베키스탄',
-    '이라크', '캐나다', '코스타리카', '파나마', '자메이카', '에콰도르', '칠레', '파라과이',
-  ],
+  WORLD_CUP: WORLD_CUP_NATIONS_META.map((n) => n.name),
   RANKED: [
     '마드리드 화이트 AI', '맨체스터 블루 AI', '뮌헨 레드 AI', '노스이스트 런던 AI', '파리 블루레드 AI',
     '카탈루냐 블루레드 AI', '머지사이드 레드 AI', '롬바르디아 AI', '울산 타이거즈 AI', '마이애미 헤론즈 AI',

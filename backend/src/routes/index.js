@@ -45,6 +45,7 @@ router.get('/v1/competitions', CompetitionController.overview);
 router.get('/v1/competitions/:mode', CompetitionController.getState);
 router.post('/v1/competitions/:mode/start', CompetitionController.start);
 router.get('/v1/competitions/:mode/next-match', CompetitionController.nextMatch);
+router.get('/v1/competitions/:mode/next', CompetitionController.nextMatch);
 
 // 라이브 경기
 router.post('/v1/matches/start', MatchController.startLive);

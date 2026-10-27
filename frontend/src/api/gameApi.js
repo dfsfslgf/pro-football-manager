@@ -25,5 +25,15 @@ export const scoutPlayers = (packageKey, count) => request('post', '/v1/scout', 
 /** 대회 */
 export const fetchCompetitions = () => request('get', '/v1/competitions');
 export const fetchCompetition = (mode) => request('get', `/v1/competitions/${mode}`);
-export const startCompetition = (mode, restart = false) => request('post', `/v1/competitions/${mode}/start`, { data: { restart } });
-export const fetchNextMatch = (mode, stageId = null) => request('get', `/v1/competitions/${mode}/next-match`, { params: stageId ? { stageId } : undefined });
+export function startCompetition(mode, restart = false, nationCode = null) {
+  return request('post', `/v1/competitions/${mode}/start`, {
+    data: { restart, nationCode },
+  });
+}
+
+export function fetchNextMatch(mode, stageId = null, nationCode = null) {
+  const params = {};
+  if (stageId !== null && stageId !== undefined) params.stageId = stageId;
+  if (nationCode) params.nationCode = nationCode;
+  return request('get', `/v1/competitions/${mode}/next-match`, { params });
+}

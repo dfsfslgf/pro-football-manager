@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, Swords } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, Sparkles, Wand2 } from 'lucide-react';
 import { startLiveSession } from '../api/matchApi.js';
 import { errorMessage } from '../api/client.js';
 import useAuthStore from '../store/useAuthStore.js';
@@ -11,89 +11,57 @@ import Panel from '../components/common/Panel.jsx';
 import Notice from '../components/common/Notice.jsx';
 import TacticsWorkspace from '../components/domain/squad/TacticsWorkspace.jsx';
 import { MODE_META } from '../constants/gameConfig.js';
-import { TEAM_TACTIC_GROUPS, TEAM_TACTIC_LABELS } from '../constants/tacticsConfig.js';
-
-function OpponentCard({ opponent }) {
-  return (
-    <Panel title="상대 팀 전력 브리핑">
-      <div className="flex items-center gap-3">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-600/20 text-2xl">
-          {opponent.emblem}
-        </span>
-        <div>
-          <p className="text-base font-black text-white" data-testid="opponent-name">
-            {opponent.name}
-          </p>
-          <p className="text-xs text-slate-400">
-            팀 평균 전력(OVR) <b className="text-emerald-300">{opponent.strength}</b> · 포메이션{' '}
-            <b className="text-white">{opponent.formation}</b>
-          </p>
-        </div>
-      </div>
-      <ul className="mt-3 space-y-1 rounded-xl bg-slate-950/60 p-2.5 text-[11px] text-slate-300">
-        {TEAM_TACTIC_GROUPS.map((g) => (
-          <li key={g.key} className="flex justify-between">
-            <span className="text-slate-500">{g.label}</span>
-            <span className="font-semibold text-slate-200">
-              {TEAM_TACTIC_LABELS[g.key]?.[opponent.tactics?.[g.key]] || '보통'}
-            </span>
-          </li>
-        ))}
-      </ul>
-      <h4 className="mb-1.5 mt-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-        상대 선발 베스트 11 (실제 로스터 & 능력치)
-      </h4>
-      <ul className="space-y-1 text-[11px] text-slate-300">
-        {opponent.starters.map((p) => (
-          <li key={p.userPlayerId} className="flex items-center justify-between rounded bg-slate-900/70 px-2 py-1">
-            <span className="truncate font-semibold text-white">
-              <span className="mr-1.5 inline-block w-7 rounded bg-slate-800 text-center text-[10px] font-bold text-rose-300">
-                {p.preferredRoleCode || p.mainPosition}
-              </span>
-              {p.name}
-            </span>
-            <span className="shrink-0 font-black text-emerald-300">OVR {p.overall || opponent.strength}</span>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
 
 export default function PreMatchLobbyPage() {
+  const user = useAuthStore((s) => s.user);
+  const club = useAuthStore((s) => s.club);
   const pending = useCompetitionStore((s) => s.pending);
   const selectedWorldCupNation = useCompetitionStore((s) => s.selectedWorldCupNation);
-  const club = useAuthStore((s) => s.club);
-  const user = useAuthStore((s) => s.user);
   const params = useNavStore((s) => s.params);
-  const loaded = useSquadStore((s) => s.loaded);
-  const starters = useSquadStore((s) => s.starters);
   const go = useNavStore((s) => s.go);
+  const starters = useSquadStore((s) => s.starters);
+  const autoFillBench = useSquadStore((s) => s.autoFillBench);
+  const autoFillAll = useSquadStore((s) => s.autoFillAll);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
-  const wcNation = params?.nation || selectedWorldCupNation;
-  // 경기 전 로비 진입 시 항상 서버에서 최신 체력 및 징계 상태를 강제 동기화함
+
+  const wcNation = params?.nation || selectedWorldCupNation || { code: 'KOR', name: '대한민국', emblem: '🐯' };
+  const resolvedNext = pending?.next?.opponent ? pending.next : pending?.opponent ? pending : null;
+
   useEffect(() => {
-    
-    if (!pending) {
-      go('modes');
+    if (!pending || !resolvedNext || !resolvedNext.opponent) {
+      go('lobby');
       return;
     }
     if (pending.mode === 'WORLD_CUP') {
-      useSquadStore.getState().loadNationalSquad(wcNation || 'KOR');
+      useSquadStore.getState().loadNationalSquad(wcNation?.code || 'KOR');
     } else {
       useSquadStore.getState().loadSquad(true);
     }
-  }, [pending, wcNation, go]);
+  }, [pending, resolvedNext, wcNation?.code, go]);
 
-  if (!pending) return null;
-  const { mode, stageId, next } = pending;
-  const { opponent, scenario } = next;
-  const meta = MODE_META[mode];
+  if (!pending || !resolvedNext || !resolvedNext.opponent) {
+    return null;
+  }
 
+  const { mode, stageId } = pending;
+  const { opponent, scenario, ref, label } = resolvedNext;
+  const meta = MODE_META[mode] || MODE_META.LEAGUE;
 
-  const displayHomeName = mode === 'WORLD_CUP' && wcNation ? `${wcNation.name} 대표팀` : club.name;
-  const displayHomeEmblem = mode === 'WORLD_CUP' && wcNation?.emblem ? wcNation.emblem : club.emblemIcon;
+  const displayHomeName =
+    mode === 'WORLD_CUP' ? `${wcNation?.name || '대한민국'} 국가대표팀` : club?.name || '내 구단';
+  const displayHomeEmblem =
+    mode === 'WORLD_CUP' ? wcNation?.emblem || '🐯' : club?.emblemIcon || '🛡️';
+
+  const handleAutoBench = () => {
+    const res = autoFillBench();
+    setNotice({ type: 'success', text: res.message });
+  };
+
+  const handleAutoAll = () => {
+    const res = autoFillAll();
+    setNotice({ type: 'success', text: res.message });
+  };
 
   const handleKickOff = async () => {
     setBusy(true);
@@ -109,7 +77,6 @@ export default function PreMatchLobbyPage() {
       return;
     }
 
-    // 클럽 모드일 때만 DB에 라인업을 저장하고, 월드컵 모드는 실제 국가대표 로스터 그대로 경기에 진입함
     if (mode !== 'WORLD_CUP') {
       const saved = await useSquadStore.getState().saveSquad();
       if (!saved.success) {
@@ -120,7 +87,10 @@ export default function PreMatchLobbyPage() {
     }
 
     try {
-      const session = await startLiveSession({ mode, stageId: next.stageId ?? stageId ?? null });
+      const session = await startLiveSession({
+        mode,
+        stageId: resolvedNext.stageId ?? stageId ?? null,
+      });
       const squad = useSquadStore.getState();
       const away = {
         clubId: 0,
@@ -128,12 +98,16 @@ export default function PreMatchLobbyPage() {
         emblem: opponent.emblem,
         formation: opponent.formation,
         tactics: opponent.tactics,
-        starters: opponent.starters.map((p, i) => normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', i + 1)),
-        bench: opponent.bench.map((p, i) => normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', 12 + i)),
+        starters: (opponent.starters || []).map((p, i) =>
+          normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', i + 1)
+        ),
+        bench: (opponent.bench || []).map((p, i) =>
+          normalizePlayer({ ...p, stamina: p.stamina ?? 100 }, 'AWAY', 12 + i)
+        ),
       };
       useLiveMatchStore.getState().initMatch({
         home: {
-          clubId: user.id,
+          clubId: user?.id || 1,
           name: displayHomeName,
           emblem: displayHomeEmblem,
           formation: squad.formation,
@@ -143,7 +117,12 @@ export default function PreMatchLobbyPage() {
         },
         away,
         sessionId: session.sessionId,
-        context: { mode, stageId: next.stageId ?? stageId ?? null, ref: next.ref, label: next.label },
+        context: {
+          mode,
+          stageId: resolvedNext.stageId ?? stageId ?? null,
+          ref: ref || 'M:1',
+          label: label || meta.title,
+        },
         scenario,
       });
       go('match');
@@ -155,62 +134,71 @@ export default function PreMatchLobbyPage() {
 
   return (
     <div className="space-y-4" data-testid="prematch-page">
-      <Panel
-        title={`${meta.icon} ${next.label} (${displayHomeName} vs ${opponent.name})`}
-        right={
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+        <div>
+          <span className="text-xs font-bold text-purple-300">
+            {meta.icon} {label}
+          </span>
+          <h2 className="mt-0.5 text-xl font-black text-white">
+            {displayHomeEmblem} {displayHomeName} <span className="text-slate-500">vs</span> {opponent.emblem}{' '}
+            {opponent.name}{' '}
+            <span className="text-sm font-bold text-amber-300">(전력 {opponent.strength})</span>
+          </h2>
+          {scenario && (
+            <p className="mt-1 text-xs text-amber-200">
+              🎯 시나리오 목표: <b>{scenario.objective?.text}</b> · {scenario.description}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => go('modes', { mode })}
-            className="inline-flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-white"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> 모드 선택으로
+            <ArrowLeft className="h-3.5 w-3.5" /> 대회 화면으로
           </button>
-        }
-      >
-        {scenario ? (
-          <div className="rounded-xl border border-purple-500/50 bg-purple-950/20 p-3" data-testid="scenario-box">
-            <p className="text-sm font-black text-purple-200">시나리오 · {scenario.title}</p>
-            <p className="mt-1 text-xs text-slate-300">{scenario.description}</p>
-            <p className="mt-1 text-[11px] text-slate-400">
-              시작 {scenario.startMinute}분 · 스코어 {scenario.scoreHome}:{scenario.scoreAway}
-              {scenario.homeRedCard && ' · 센터백 퇴장 (10명)'} · 목표: {scenario.objective.text}
-            </p>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">
-            상대 팀의 포메이션과 주요 선수를 확인한 뒤 전술과 선수 체력을 점검하고 킥오프를 눌러 경기장에 입장하세요.
-          </p>
-        )}
-      </Panel>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-        <div className="xl:col-span-1">
-          <OpponentCard opponent={opponent} />
+          <button
+            type="button"
+            onClick={handleKickOff}
+            disabled={busy}
+            data-testid="kickoff-button"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-6 py-2.5 text-sm font-black text-white shadow-lg hover:from-emerald-500 hover:to-blue-500 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} 킥오프 (경기 시작)
+          </button>
         </div>
-        <Panel title="내 라인업 · 전술 점검 (실제 보유 체력 반영)" className="xl:col-span-3">
-          {loaded ? (
-            <TacticsWorkspace source="squad" />
-          ) : (
-            <p className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" /> 라인업을 불러오는 중...
-            </p>
-          )}
-        </Panel>
       </div>
 
       <Notice notice={notice} />
-      <div className="sticky bottom-0 flex justify-end rounded-xl bg-slate-950/90 py-3 backdrop-blur">
-        <button
-          type="button"
-          disabled={busy || !loaded}
-          onClick={handleKickOff}
-          data-testid="kickoff-button"
-          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg transition hover:from-emerald-500 hover:to-blue-500 disabled:opacity-50"
-        >
-          {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Swords className="h-5 w-5" />}
-          라인업 저장 및 경기장 입장 (Kick Off)
-        </button>
-      </div>
+
+      <Panel
+        title={
+          mode === 'WORLD_CUP'
+            ? `🌍 2026 월드컵 ${displayHomeName} 26인 공식 엔트리 & 전술 점검`
+            : '출전 라인업 & 후보 11명 최종 점검'
+        }
+        right={
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleAutoBench}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 bg-sky-500/15 px-3 py-1.5 text-xs font-bold text-sky-200 hover:bg-sky-500/25"
+            >
+              <Wand2 className="h-3.5 w-3.5" /> 후보 11명 자동완성
+            </button>
+            <button
+              type="button"
+              onClick={handleAutoAll}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/15 px-3 py-1.5 text-xs font-bold text-amber-200 hover:bg-amber-500/25"
+            >
+              <Sparkles className="h-3.5 w-3.5" /> 선발+후보 22명 전체 자동완성
+            </button>
+          </div>
+        }
+      >
+        <TacticsWorkspace source="squad" />
+      </Panel>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Loader2, RotateCcw, Search, Shield, Trophy, X } from 'lucide-react';
+import { Check, Loader2, RotateCcw, Search, Shield, Trophy, X } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore.js';
 import useCompetitionStore from '../store/useCompetitionStore.js';
 import useNavStore from '../store/useNavStore.js';
@@ -7,24 +7,16 @@ import Panel from '../components/common/Panel.jsx';
 import Notice from '../components/common/Notice.jsx';
 import { StandingsTable } from '../components/domain/liveMatch/FullTimeReportModal.jsx';
 import { MODE_META, MODE_ORDER, formatNumber } from '../constants/gameConfig.js';
+import { WC_2026_NATIONAL_ROSTERS, WORLD_CUP_48_NATIONS } from '../constants/nationalSquads.js';
 
-// 2026 북중미 월드컵 주요 참가국 선택 목록
-const WORLD_CUP_NATIONS = [
-  { code: 'KOR', name: '대한민국', emblem: '🐯', ovr: 84, stars: ['손흥민 (LW · 90)', '김민재 (CB · 88)', '이강인 (CAM · 86)', '황희찬 (ST · 83)'] },
-  { code: 'ARG', name: '아르헨티나', emblem: '☀️', ovr: 91, stars: ['리오넬 메시 (RW · 92)', '라우타로 마르티네스 (ST · 89)', '엔소 페르난데스 (CM · 86)'] },
-  { code: 'FRA', name: '프랑스', emblem: '🐓', ovr: 92, stars: ['킬리안 음바페 (ST · 92)', '앙투안 그리에즈만 (CAM · 88)', '윌리엄 살리바 (CB · 89)'] },
-  { code: 'ENG', name: '잉글랜드', emblem: '🦁', ovr: 91, stars: ['해리 케인 (ST · 91)', '주드 벨링엄 (CAM · 90)', '부카요 사카 (RW · 88)'] },
-  { code: 'BRA', name: '브라질', emblem: '⭐', ovr: 90, stars: ['비니시우스 주니오르 (LW · 91)', '호드리구 (RW · 87)', '알리송 베케르 (GK · 89)'] },
-  { code: 'ESP', name: '스페인', emblem: '👑', ovr: 91, stars: ['로드리 (CDM · 91)', '라민 야말 (RW · 88)', '페드리 (CM · 88)'] },
-  { code: 'GER', name: '독일', emblem: '🦅', ovr: 89, stars: ['자말 무시알라 (CAM · 89)', '플로리안 비르츠 (CAM · 89)', '안토니오 뤼디거 (CB · 88)'] },
-  { code: 'POR', name: '포르투갈', emblem: '🛡️', ovr: 89, stars: ['크리스티아누 호날두 (ST · 87)', '브루노 페르난데스 (CAM · 88)', '후벵 디아스 (CB · 89)'] },
-  { code: 'NED', name: '네덜란드', emblem: '🦁', ovr: 87, stars: ['버질 판 데이크 (CB · 90)', '프렝키 더 용 (CM · 87)', '코디 학포 (LW · 85)'] },
-  { code: 'ITA', name: '이탈리아', emblem: '🛡️', ovr: 87, stars: ['니콜로 바렐라 (CM · 87)', '알레산드로 바스토니 (CB · 87)', '잔루이지 돈나룸마 (GK · 89)'] },
-  { code: 'URU', name: '우루과이', emblem: '☀️', ovr: 86, stars: ['페데리코 발베르데 (CM · 89)', '로날드 아라우호 (CB · 86)', '다르윈 누녜스 (ST · 84)'] },
-  { code: 'JPN', name: '일본', emblem: '🌊', ovr: 83, stars: ['쿠보 다케후사 (RW · 84)', '미토마 가오루 (LW · 83)', '엔도 와타루 (CDM · 82)'] },
-  { code: 'USA', name: '미국', emblem: '🦅', ovr: 82, stars: ['크리스티안 풀리식 (LW · 84)', '웨스턴 맥케니 (CM · 80)', '안토니 로빈슨 (LB · 81)'] },
-  { code: 'MAR', name: '모로코', emblem: '🦁', ovr: 83, stars: ['아슈라프 하키미 (RB · 87)', '브라힘 디아스 (CAM · 83)', '야신 부누 (GK · 84)'] },
-  { code: 'COL', name: '콜롬비아', emblem: '☕', ovr: 84, stars: ['루이스 디아스 (LW · 86)', '하메스 로드리게스 (CAM · 83)', '다빈손 산체스 (CB · 81)'] },
+const CONFED_TABS = [
+  { key: 'ALL', label: '전체 (48개국)' },
+  { key: 'UEFA', label: '유럽 (16)' },
+  { key: 'CONMEBOL', label: '남미 (6)' },
+  { key: 'AFC', label: '아시아 (8)' },
+  { key: 'CAF', label: '아프리카 (9)' },
+  { key: 'CONCACAF', label: '북중미 (8)' },
+  { key: 'OFC', label: '오세아니아 (1)' },
 ];
 
 const CLUB_KEY_PLAYERS_MAP = {
@@ -55,7 +47,23 @@ const DYNAMIC_STAR_POOL_GK = ['다비드 라야', '굴리엘모 비카리오', '
 
 function getOpponentScoutInfo(teamObjOrName) {
   const name = typeof teamObjOrName === 'string' ? teamObjOrName : teamObjOrName?.name || '상대 구단';
-  const strength = Math.round(teamObjOrName?.strength || teamObjOrName?.avgOvr || 80);
+  const code = typeof teamObjOrName === 'object' ? teamObjOrName?.code || teamObjOrName?.id : null;
+  const strength = Math.round(teamObjOrName?.strength || teamObjOrName?.avgOvr || 82);
+
+  const matchedRoster =
+    (code && WC_2026_NATIONAL_ROSTERS[code]) ||
+    Object.values(WC_2026_NATIONAL_ROSTERS).find((r) => name.includes(r.name) || r.name.includes(name));
+
+  if (matchedRoster) {
+    return {
+      name: `${matchedRoster.name} 국가대표팀 (26인 공식 엔트리)`,
+      formation: matchedRoster.formation,
+      avgOvr: strength || matchedRoster.ovr,
+      style: '2026 북중미 월드컵 본선 대표팀 전술',
+      recentForm: ['W', 'W', 'D', 'W', 'W'],
+      keyPlayers: matchedRoster.players.slice(0, 8).map((p) => `#${p.no} ${p.name} (${p.role} · OVR ${p.ovr})`),
+    };
+  }
 
   const exactKey = Object.keys(CLUB_KEY_PLAYERS_MAP).find((k) => name.includes(k) || k.includes(name));
   if (exactKey) {
@@ -67,18 +75,6 @@ function getOpponentScoutInfo(teamObjOrName) {
       style: info.style,
       recentForm: ['W', 'W', 'D', 'W', 'L'],
       keyPlayers: info.keyPlayers,
-    };
-  }
-
-  const natMatch = WORLD_CUP_NATIONS.find((n) => name.includes(n.name));
-  if (natMatch) {
-    return {
-      name: `${natMatch.name} 국가대표팀`,
-      formation: '4-3-3',
-      avgOvr: natMatch.ovr,
-      style: '국가대표 밸런스 & 에이스 중심 전술',
-      recentForm: ['W', 'W', 'D', 'W', 'W'],
-      keyPlayers: natMatch.stars,
     };
   }
 
@@ -111,9 +107,10 @@ function getOpponentScoutInfo(teamObjOrName) {
   };
 }
 
-function teamName(state, id, clubName, selectedNation) {
-  if (id === 'USER') return selectedNation ? `${selectedNation.name} 대표팀` : clubName;
-  return state?.teams?.[id]?.name || id || '미정';
+function teamName(state, id, clubName) {
+  if (state?.teams?.[id]?.name) return state.teams[id].name;
+  if (id === 'USER') return clubName;
+  return id || '미정';
 }
 
 function OpponentScoutModal({ teamInfo, onClose }) {
@@ -183,7 +180,8 @@ function OpponentScoutModal({ teamInfo, onClose }) {
   );
 }
 
-function Bracket({ state, clubName, selectedNation, onInspectTeam }) {
+function Bracket({ state, clubName, onInspectTeam }) {
+  const userIdKey = state.userTeamId || 'USER';
   const names = state.roundNames || [];
   const columns = names.map((name, i) => ({ name, matches: state.rounds?.[i]?.matches || null }));
   return (
@@ -197,9 +195,9 @@ function Bracket({ state, clubName, selectedNation, onInspectTeam }) {
                 const played = m.ga !== null && m.ga !== undefined;
                 const aWon = m.winner === m.a;
                 const bWon = m.winner === m.b;
-                const hasUser = m.a === 'USER' || m.b === 'USER';
-                const nameA = teamName(state, m.a, clubName, selectedNation);
-                const nameB = teamName(state, m.b, clubName, selectedNation);
+                const hasUser = m.a === userIdKey || m.b === userIdKey;
+                const nameA = teamName(state, m.a, clubName);
+                const nameB = teamName(state, m.b, clubName);
                 return (
                   <li
                     key={i}
@@ -208,7 +206,7 @@ function Bracket({ state, clubName, selectedNation, onInspectTeam }) {
                     }`}
                   >
                     <div
-                      onClick={() => m.a !== 'USER' && onInspectTeam(state?.teams?.[m.a] || nameA)}
+                      onClick={() => onInspectTeam(state?.teams?.[m.a] || nameA)}
                       className={`flex cursor-pointer justify-between hover:text-blue-300 ${
                         aWon ? 'font-black text-white' : 'text-slate-400'
                       }`}
@@ -217,7 +215,7 @@ function Bracket({ state, clubName, selectedNation, onInspectTeam }) {
                       <span>{played ? m.ga : '-'}</span>
                     </div>
                     <div
-                      onClick={() => m.b !== 'USER' && onInspectTeam(state?.teams?.[m.b] || nameB)}
+                      onClick={() => onInspectTeam(state?.teams?.[m.b] || nameB)}
                       className={`flex cursor-pointer justify-between hover:text-blue-300 ${
                         bWon ? 'font-black text-white' : 'text-slate-400'
                       }`}
@@ -248,7 +246,6 @@ function LeagueView({ detail, clubName, onInspectTeam }) {
   const winCash = Math.round(350 * mult);
   const isBundes = state.leagueCode === 'BUNDES_1' || detail.standings?.length === 18 || detail.standings?.length <= 14;
 
-  // 잔여 라운드 기준 조기 우승 확정 여부 표시
   const standings = detail.standings || [];
   const remainingMatches = Math.max(0, (state.totalRounds || 38) - (state.round - 1));
   const isEarlyClinched =
@@ -323,67 +320,157 @@ function LeagueView({ detail, clubName, onInspectTeam }) {
 }
 
 function WorldCupView({ detail, clubName, selectedNation, onSelectNation, onInspectTeam }) {
+  const [confedFilter, setConfedFilter] = useState('ALL');
   const state = detail.state;
   const tierLevel = state?.tierLevel || 1;
   const mult = Math.pow(1.35, tierLevel - 1);
   const groupEntries = Object.entries(detail.groupStandings || {});
+  const userTeamId = state?.userTeamId || selectedNation?.code || 'KOR';
+  const userGroup = state?.userGroup || groupEntries.find(([, rows]) => rows.some((r) => r.id === userTeamId))?.[0] || 'A';
+  const canSwitchNation = state?.phase === 'GROUP' && (state?.matchday || 1) === 1 && !state?.nationLocked;
+
+  const filteredNations = WORLD_CUP_48_NATIONS.filter((n) =>
+    confedFilter === 'ALL' ? true : n.confed === confedFilter
+  );
 
   return (
     <div className="space-y-4">
       <Panel
-        title={`🌍 2026 내셔널 월드컵 (48개국) 참가 국가대표팀 선택 (난이도 Lv.${tierLevel})`}
+        title={`🌍 2026 북중미 월드컵 48개국 전체 국가대표팀 선택 (현재 플레이 국가: ${userGroup}조 · ${
+          state?.teams?.[userTeamId]?.name || selectedNation.name
+        })`}
         right={
           <span className="text-xs font-bold text-amber-300">
             🏆 우승 보상: {formatNumber(Math.round(50000 * mult))} G + {formatNumber(Math.round(500 * mult))} 캐시
           </span>
         }
       >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-          {WORLD_CUP_NATIONS.map((nat) => (
-            <button
-              key={nat.code}
-              type="button"
-              onClick={() => onSelectNation(nat)}
-              className={`rounded-xl border p-2.5 text-left transition ${
-                selectedNation.code === nat.code
-                  ? 'border-amber-400 bg-amber-500/20 text-white'
-                  : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black">
-                  {nat.emblem} {nat.name}
-                </span>
-                <span className="text-[11px] font-bold text-emerald-400">{nat.ovr}</span>
-              </div>
-              <p className="mt-1 truncate text-[10px] text-slate-400">{nat.stars.slice(0, 2).join(', ')}</p>
-            </button>
-          ))}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-slate-400">
+            {canSwitchNation
+              ? '48개 본선 진출국 중 원하는 국가를 클릭하면 즉시 해당 국가와 편성된 조로 전환됩니다.'
+              : '조별리그 경기가 이미 시작되어 플레이 국가가 확정되었습니다.'}
+          </p>
+          <div className="flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1">
+            {CONFED_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setConfedFilter(tab.key)}
+                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                  confedFilter === tab.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="max-h-72 overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
+            {filteredNations.map((nat) => {
+              const assignedGroup =
+                groupEntries.find(([, rows]) => rows.some((r) => r.id === nat.code || r.name === nat.name))?.[0] || '-';
+              const isSelected = userTeamId === nat.code;
+              return (
+                <button
+                  key={nat.code}
+                  type="button"
+                  disabled={!canSwitchNation && !isSelected}
+                  onClick={() => onSelectNation(nat)}
+                  className={`rounded-xl border p-2.5 text-left transition disabled:opacity-45 ${
+                    isSelected
+                      ? 'border-amber-400 bg-amber-500/20 text-white ring-1 ring-amber-400'
+                      : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-blue-400/60 hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="truncate text-xs font-black">
+                      {nat.emblem} {nat.name}
+                    </span>
+                    <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-black text-blue-300">
+                      {assignedGroup}조
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>OVR {nat.ovr}</span>
+                    <span className="truncate text-emerald-300">{nat.stars[0].split(' ')[0]}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </Panel>
 
       {groupEntries.length > 0 && (
-        <Panel title="2026 월드컵 48개국 조별리그 순위표 (A조 ~ L조 · 상위 32개국 토너먼트 진출)">
+        <Panel title="2026 월드컵 48개국 조별리그 순위표 (A조 ~ L조 · 아래 표에서 국가를 클릭해 선택하거나 전력을 확인할 수 있습니다)">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {groupEntries.map(([group, rows]) => (
-              <div key={group} className={group === 'A' ? 'rounded-lg border border-blue-500/50 bg-blue-950/10 p-2' : 'rounded-lg border border-slate-800 p-2'}>
-                <h4 className="mb-1 text-xs font-bold text-slate-300">
-                  {group}조 {group === 'A' && `(${selectedNation.name} 소속 조)`}
-                </h4>
-                <StandingsTable
-                  rows={rows.map((r) => ({ ...r, name: teamName(state, r.id, clubName, selectedNation) }))}
-                  limit={4}
-                  division={2}
-                />
-              </div>
-            ))}
+            {groupEntries.map(([group, rows]) => {
+              const isMyGroup = group === userGroup;
+              return (
+                <div
+                  key={group}
+                  className={
+                    isMyGroup
+                      ? 'rounded-xl border-2 border-amber-400/80 bg-amber-950/15 p-2.5'
+                      : 'rounded-xl border border-slate-800 bg-slate-950/40 p-2.5'
+                  }
+                >
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <h4 className="text-xs font-black text-white">
+                      {group}조 {isMyGroup && <span className="ml-1 text-amber-300">★ 내 대표팀 소속 조</span>}
+                    </h4>
+                    <span className="text-[10px] text-slate-400">
+                      {rows.map((r) => state?.teams?.[r.id]?.confed).filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                  <StandingsTable
+                    rows={rows.map((r) => ({
+                      ...r,
+                      id: r.id === userTeamId ? 'USER' : r.id,
+                      name: r.name,
+                    }))}
+                    limit={4}
+                    division={2}
+                  />
+                  <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-800/80 pt-2">
+                    {rows.map((r) => {
+                      const natMeta = WORLD_CUP_48_NATIONS.find((n) => n.code === r.id || n.name === r.name);
+                      const isMe = r.id === userTeamId;
+                      return (
+                        <div key={r.id} className="flex items-center gap-1">
+                          {canSwitchNation && natMeta && !isMe && (
+                            <button
+                              type="button"
+                              onClick={() => onSelectNation(natMeta)}
+                              className="inline-flex items-center gap-0.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/40"
+                            >
+                              <Check className="h-2.5 w-2.5" /> {r.name} 선택
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onInspectTeam(state?.teams?.[r.id] || { code: r.id, name: r.name })}
+                            className="inline-flex items-center gap-0.5 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-white"
+                          >
+                            🔍 {r.name} 명단
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Panel>
       )}
 
       {state?.phase === 'KNOCKOUT' && (
-        <Panel title="32강 결선 토너먼트 대진표">
-          <Bracket state={state} clubName={clubName} selectedNation={selectedNation} onInspectTeam={onInspectTeam} />
+        <Panel title="32강 결선 토너먼트 대진표 (동일 조 출신 32강 맞대결 방지 적용)">
+          <Bracket state={state} clubName={clubName} onInspectTeam={onInspectTeam} />
         </Panel>
       )}
     </div>
@@ -501,7 +588,7 @@ export default function GameModeSelectPage() {
   const go = useNavStore((s) => s.go);
   const list = useCompetitionStore((s) => s.list);
   const details = useCompetitionStore((s) => s.details);
-  const selectedNation = useCompetitionStore((s) => s.selectedWorldCupNation) || WORLD_CUP_NATIONS[0];
+  const selectedNation = useCompetitionStore((s) => s.selectedWorldCupNation) || WORLD_CUP_48_NATIONS[0];
   const setSelectedNation = useCompetitionStore((s) => s.setSelectedWorldCupNation);
   const loadList = useCompetitionStore((s) => s.loadList);
   const loadDetail = useCompetitionStore((s) => s.loadDetail);
@@ -527,8 +614,22 @@ export default function GameModeSelectPage() {
   const status = detail?.status || rowInList?.status || 'NONE';
   const isPersistent = mode === 'CHALLENGE_TOWER' || mode === 'RANKED';
 
+  const handleSelectWorldCupNation = async (nat) => {
+    if (typeof setSelectedNation === 'function') setSelectedNation(nat);
+    setBusy(true);
+    if (status === 'ACTIVE' && detail?.state?.phase === 'GROUP' && (detail?.state?.matchday || 1) === 1) {
+      await startMode('WORLD_CUP', false, nat.code);
+      await loadDetail('WORLD_CUP');
+    }
+    setBusy(false);
+    setNotice({
+      type: 'success',
+      text: `🌍 플레이 국가를 [${nat.name} 국가대표팀]으로 변경했습니다. 해당 국가의 실제 26인 로스터와 조 편성으로 진행합니다.`,
+    });
+  };
+
   const goToPreMatch = async (stageId = null) => {
-    const result = await prepareNextMatch(mode, stageId);
+    const result = await prepareNextMatch(mode, stageId, mode === 'WORLD_CUP' ? selectedNation.code : null);
     if (!result.ok) {
       setNotice({ type: 'error', text: result.message });
       return;
@@ -536,21 +637,33 @@ export default function GameModeSelectPage() {
     go('prematch', { mode, nation: mode === 'WORLD_CUP' ? selectedNation : null });
   };
 
-  const handleStart = async (restart = false) => {
+  const handleForfeitAndGoDashboard = async () => {
     setBusy(true);
     setNotice(null);
-    if (restart && !window.confirm('진행 중인 대회를 포기하고 새로 시작할까요? 기존 진행 상황이 초기화됩니다.')) {
-      setBusy(false);
-      return;
-    }
-    if (status === 'NONE' || status === 'FINISHED' || restart) {
-      const result = await startMode(mode, true);
+    await startMode(mode, true, mode === 'WORLD_CUP' ? selectedNation.code : null);
+    setBusy(false);
+    go('lobby');
+  };
+
+  const handleStart = async () => {
+    setBusy(true);
+    setNotice(null);
+    if (status === 'NONE' || status === 'FINISHED') {
+      const result = await startMode(mode, true, mode === 'WORLD_CUP' ? selectedNation.code : null);
       if (!result.ok) {
         setNotice({ type: 'error', text: result.message });
         setBusy(false);
         return;
       }
       await loadDetail(mode);
+      if (mode === 'WORLD_CUP') {
+        setNotice({
+          type: 'success',
+          text: '🎲 48개국 조 편성이 완료되었습니다. 48개국 중 플레이할 국가를 선택한 뒤 [이어하기 (다음 경기 입장)]을 눌러주세요.',
+        });
+        setBusy(false);
+        return;
+      }
     }
     if (mode === 'CHALLENGE_TOWER') {
       setBusy(false);
@@ -570,15 +683,19 @@ export default function GameModeSelectPage() {
     status === 'ACTIVE'
       ? mode === 'RANKED'
         ? '랭크 매치 시작'
-        : '이어하기 (다음 경기)'
+        : '이어하기 (다음 경기 입장)'
       : status === 'FINISHED'
       ? mode === 'LEAGUE'
         ? '다음 시즌 시작 (난이도·보상 UP)'
+        : mode === 'WORLD_CUP'
+        ? '🎲 새 월드컵 48개국 조 추첨'
         : '새 대회 도전 (난이도·보상 UP)'
       : mode === 'CHALLENGE_TOWER'
       ? '챌린지 시작'
       : mode === 'RANKED'
       ? '랭크 시작'
+      : mode === 'WORLD_CUP'
+      ? '🎲 1단계: 48개국 조 추첨 실행'
       : '대회 시작';
 
   return (
@@ -615,17 +732,17 @@ export default function GameModeSelectPage() {
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => handleStart(true)}
+                onClick={handleForfeitAndGoDashboard}
                 className="inline-flex items-center gap-1 rounded-lg border border-rose-500/60 bg-rose-950/40 px-3 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-900/60"
               >
-                <RotateCcw className="h-3.5 w-3.5" /> 포기하고 새로 시작
+                <RotateCcw className="h-3.5 w-3.5" /> 포기하고 대시보드로
               </button>
             )}
             {mode !== 'CHALLENGE_TOWER' || status === 'NONE' ? (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => handleStart(false)}
+                onClick={handleStart}
                 data-testid="mode-start"
                 className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-blue-600 px-5 py-1.5 text-xs font-black text-white hover:from-emerald-500 hover:to-blue-500 disabled:opacity-50"
               >
@@ -638,36 +755,6 @@ export default function GameModeSelectPage() {
         <p className="text-xs text-slate-400">{meta.desc}</p>
         <p className="mt-1 text-xs font-semibold text-slate-300">{detail?.summary || rowInList?.summary || '아직 시작하지 않았습니다.'}</p>
       </Panel>
-
-      {mode === 'WORLD_CUP' && (!detail || !detail.state) && (
-        <Panel title="🌍 2026 내셔널 월드컵 (48개국) 참가 국가대표팀 선택">
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            {WORLD_CUP_NATIONS.map((nat) => (
-              <button
-                key={nat.code}
-                type="button"
-                onClick={() => {
-                  if (typeof setSelectedNation === 'function') setSelectedNation(nat);
-                  setNotice({ type: 'success', text: `🌍 월드컵 출전 국가를 [${nat.name}] 대표팀으로 설정했습니다.` });
-                }}
-                className={`rounded-xl border p-2.5 text-left transition ${
-                  selectedNation.code === nat.code
-                    ? 'border-amber-400 bg-amber-500/20 text-white'
-                    : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black">
-                    {nat.emblem} {nat.name}
-                  </span>
-                  <span className="text-[11px] font-bold text-emerald-400">{nat.ovr}</span>
-                </div>
-                <p className="mt-1 truncate text-[10px] text-slate-400">{nat.stars.slice(0, 2).join(', ')}</p>
-              </button>
-            ))}
-          </div>
-        </Panel>
-      )}
 
       {detail && detail.state && (
         <>
@@ -700,10 +787,7 @@ export default function GameModeSelectPage() {
               detail={detail}
               clubName={club.name}
               selectedNation={selectedNation}
-              onSelectNation={(nat) => {
-                if (typeof setSelectedNation === 'function') setSelectedNation(nat);
-                setNotice({ type: 'success', text: `🌍 월드컵 출전 국가를 [${nat.name}] 대표팀으로 설정했습니다.` });
-              }}
+              onSelectNation={handleSelectWorldCupNation}
               onInspectTeam={(t) => setScoutTarget(getOpponentScoutInfo(t))}
             />
           )}

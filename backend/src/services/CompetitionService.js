@@ -10,396 +10,330 @@ import {
   TOWER_REPEAT_REWARD,
   TOWER_STAGES,
   WORLD_CUP,
+  WORLD_CUP_NATIONS_META,
 } from '../constants/competitionRules.js';
-import { ConflictError, NotFoundError, ValidationError } from '../constants/errorCodes.js';
+import { NotFoundError, ValidationError } from '../constants/errorCodes.js';
 import ClubRepository from '../repositories/ClubRepository.js';
-import { createRng } from '../utils/seededRandom.js';
 import { computeOverall } from '../utils/playerMath.js';
+import { createRng } from '../utils/seededRandom.js';
 import { buildOpponent, emblemFor } from './OpponentFactory.js';
 
-const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const GROUP_MATCHDAYS = [
+  [
+    [0, 1],
+    [2, 3],
+  ],
+  [
+    [0, 2],
+    [1, 3],
+  ],
+  [
+    [0, 3],
+    [1, 2],
+  ],
+];
 
-export const REAL_LEAGUE_CONFIGS = {
+const REAL_LEAGUE_CONFIGS = {
   EPL_1: {
     code: 'EPL_1',
-    title: '프리미어리그 (1부 · 20팀)',
+    title: '잉글랜드 프리미어리그 (1부 · 20개 구단)',
     teamCount: 20,
-    promoteCount: 0,
-    relegateCount: 3,
     clubs: [
-      { name: '맨체스터 블루', emblem: '⛵', strength: 91 },
-      { name: '노스 런던 레드', emblem: '💣', strength: 90 },
-      { name: '머지사이드 레드', emblem: '🦅', strength: 90 },
-      { name: '노스이스트 런던', emblem: '🐓', strength: 86 },
-      { name: '웨스트 런던 블루', emblem: '🦁', strength: 86 },
-      { name: '맨체스터 레드', emblem: '🔱', strength: 85 },
-      { name: '타인사이드 블랙화이트', emblem: '🦅', strength: 85 },
-      { name: '버밍엄 클라렛', emblem: '🦁', strength: 85 },
-      { name: '서식스 시걸스', emblem: '🕊️', strength: 82 },
-      { name: '이스트 런던 해머스', emblem: '⚒️', strength: 81 },
-      { name: '사우스 런던 이글스', emblem: '🦅', strength: 80 },
-      { name: '템스 화이트', emblem: '🛡️', strength: 80 },
-      { name: '미들랜즈 골드울브스', emblem: '🐺', strength: 79 },
-      { name: '웨스트 런던 비즈', emblem: '🐝', strength: 79 },
-      { name: '도싯 체리레드', emblem: '🍒', strength: 79 },
-      { name: '머지사이드 블루', emblem: '🗼', strength: 78 },
-      { name: '노팅엄 포레스트 레드', emblem: '🌲', strength: 79 },
-      { name: '레스터 폭스 블루', emblem: '🦊', strength: 77 },
-      { name: '서퍽 트랙터 블루', emblem: '🐎', strength: 75 },
-      { name: '사우스코스트 세인츠', emblem: '😇', strength: 76 },
+      { name: '맨체스터 블루', strength: 88 },
+      { name: '노스 런던 레드', strength: 86 },
+      { name: '머지사이드 레드', strength: 86 },
+      { name: '노스이스트 런던', strength: 83 },
+      { name: '웨스트 런던 블루', strength: 83 },
+      { name: '맨체스터 레드', strength: 82 },
+      { name: '타인사이드 블랙화이트', strength: 82 },
+      { name: '버밍엄 클라렛', strength: 82 },
+      { name: '서식스 시걸스', strength: 79 },
+      { name: '이스트 런던 해머스', strength: 79 },
+      { name: '사우스 런던 이글스', strength: 78 },
+      { name: '템스 화이트', strength: 77 },
+      { name: '미들랜즈 골드울브스', strength: 77 },
+      { name: '웨스트 런던 비즈', strength: 77 },
+      { name: '도싯 체리레드', strength: 76 },
+      { name: '머지사이드 블루', strength: 76 },
+      { name: '노팅엄 포레스트 레드', strength: 76 },
+      { name: '레스터 폭스 블루', strength: 74 },
+      { name: '서퍽 트랙터 블루', strength: 73 },
+      { name: '사우스코스트 세인츠', strength: 74 },
     ],
   },
   EFL_2: {
     code: 'EFL_2',
-    title: '챔피언십 (2부 · 24팀)',
+    title: 'EFL 챔피언십 (2부 · 24개 구단)',
     teamCount: 24,
-    promoteCount: 3,
-    relegateCount: 3,
     clubs: [
-      { name: '리즈 요크셔 화이트', emblem: '⚡', strength: 79 },
-      { name: '랭커셔 클라렛', emblem: '🛡️', strength: 78 },
-      { name: '셰필드 블레이즈', emblem: '⚔️', strength: 78 },
-      { name: '베드퍼드셔 해터스', emblem: '🎩', strength: 76 },
-      { name: '티사이드 레드', emblem: '🦁', strength: 76 },
-      { name: '노퍽 카나리아', emblem: '🐤', strength: 76 },
-      { name: '웨스트브롬 스로슬스', emblem: '🐦', strength: 76 },
-      { name: '웨어사이드 블랙캣츠', emblem: '🐈', strength: 76 },
-      { name: '코번트리 스카이블루', emblem: '🐘', strength: 75 },
-      { name: '스토크 포터스 레드', emblem: '🔥', strength: 75 },
-      { name: '스완지 스완즈 화이트', emblem: '🦢', strength: 75 },
-      { name: '런던 호프스 블루', emblem: '👑', strength: 75 },
-      { name: '하트퍼드셔 호넷츠', emblem: '🐝', strength: 74 },
-      { name: '험버사이드 타이거즈', emblem: '🐯', strength: 74 },
-      { name: '랭커셔 로버스', emblem: '🌹', strength: 74 },
-      { name: '브리스톨 로빈스', emblem: '🐦', strength: 74 },
-      { name: '프레스턴 릴리화이트', emblem: '🛡️', strength: 73 },
-      { name: '사우스웨일스 블루버즈', emblem: '🐦', strength: 73 },
-      { name: '사우스런던 라이온스', emblem: '🦁', strength: 73 },
-      { name: '셰필드 아울스', emblem: '🦉', strength: 73 },
-      { name: '데본 필그림스 그린', emblem: '⛵', strength: 72 },
-      { name: '더비 램스 화이트', emblem: '🐏', strength: 72 },
-      { name: '포츠머스 폼피 블루', emblem: '⚓', strength: 72 },
-      { name: '옥스퍼드 옐로우즈', emblem: '🐂', strength: 71 },
-    ],
-  },
-  BUNDES_1: {
-    code: 'BUNDES_1',
-    title: '분데스리가 (1부 · 18팀)',
-    teamCount: 18,
-    promoteCount: 0,
-    relegateCount: 2,
-    clubs: [
-      { name: '뮌헨 레드', emblem: '🏆', strength: 91 },
-      { name: '라인 레드블랙', emblem: '🦁', strength: 89 },
-      { name: '베스트팔렌 옐로우', emblem: '🐝', strength: 87 },
-      { name: '작센 레드불스', emblem: '🐂', strength: 86 },
-      { name: '슈투트가르트 화이트레드', emblem: '🏎️', strength: 84 },
-      { name: '프랑크푸르트 이글스', emblem: '🦅', strength: 83 },
-      { name: '크라이히가우 블루', emblem: '🛡️', strength: 80 },
-      { name: '브라이스가우 그리핀', emblem: '🦅', strength: 81 },
-      { name: '하이덴하임 레드블루', emblem: '🏰', strength: 77 },
-      { name: '베저 그린화이트', emblem: '🍀', strength: 79 },
-      { name: '아우크스부르크 트리컬러', emblem: '🌲', strength: 78 },
-      { name: '니더작센 그린울브스', emblem: '🐺', strength: 80 },
-      { name: '마인츠 카니발 레드', emblem: '🎭', strength: 79 },
-      { name: '보루시아 포얼스', emblem: '🐎', strength: 79 },
-      { name: '쾨페니크 아이언레드', emblem: '🔨', strength: 78 },
-      { name: '보훔 블루화이트', emblem: '🛡️', strength: 76 },
-      { name: '함부르크 해적 브라운', emblem: '🏴‍☠️', strength: 75 },
-      { name: '홀슈타인 스톡스 블루', emblem: '⚓', strength: 75 },
-    ],
-  },
-  LALIGA_1: {
-    code: 'LALIGA_1',
-    title: '라리가 (1부 · 20팀)',
-    teamCount: 20,
-    promoteCount: 0,
-    relegateCount: 3,
-    clubs: [
-      { name: '마드리드 화이트', emblem: '👑', strength: 92 },
-      { name: '카탈루냐 블루레드', emblem: '🔥', strength: 90 },
-      { name: '마드리드 로히블랑코', emblem: '⭐', strength: 88 },
-      { name: '히로나 레드화이트', emblem: '🦁', strength: 83 },
-      { name: '바스크 라이온스', emblem: '🦁', strength: 84 },
-      { name: '산세바스티안 블루화이트', emblem: '👑', strength: 83 },
-      { name: '안달루시아 그린화이트', emblem: '🍀', strength: 82 },
-      { name: '발렌시아 옐로우서브마린', emblem: '🚢', strength: 82 },
-      { name: '발렌시아 배츠 화이트', emblem: '🦇', strength: 80 },
-      { name: '세비야 레드화이트', emblem: '🏆', strength: 80 },
-      { name: '팜플로나 레드', emblem: '🦁', strength: 79 },
-      { name: '마드리드 사우스 블루', emblem: '✈️', strength: 78 },
-      { name: '갈리시아 스카이블루', emblem: '⚔️', strength: 79 },
-      { name: '발레아레스 아일랜드 레드', emblem: '👹', strength: 79 },
-      { name: '비토리아 블루화이트', emblem: '🛡️', strength: 77 },
-      { name: '카나리아 옐로우블루', emblem: '🌴', strength: 77 },
-      { name: '바예카스 라이트닝', emblem: '⚡', strength: 78 },
-      { name: '레가네스 오이블루', emblem: '🛡️', strength: 76 },
-      { name: '카스티야 바이올렛', emblem: '🟣', strength: 76 },
-      { name: '바르셀로나 블루화이트', emblem: '🦜', strength: 76 },
-    ],
-  },
-  SERIE_A: {
-    code: 'SERIE_A',
-    title: '세리에 A (1부 · 20팀)',
-    teamCount: 20,
-    promoteCount: 0,
-    relegateCount: 3,
-    clubs: [
-      { name: '롬바르디아 블루블랙', emblem: '🐍', strength: 90 },
-      { name: '밀라노 레드블랙', emblem: '🔱', strength: 87 },
-      { name: '피에몬테 블랙화이트', emblem: '🦓', strength: 87 },
-      { name: '나폴리 아주리', emblem: '🌋', strength: 87 },
-      { name: '베르가모 블루블랙', emblem: '⚡', strength: 86 },
-      { name: '로마 잘로로시', emblem: '🐺', strength: 84 },
-      { name: '라치오 스카이이글스', emblem: '🦅', strength: 83 },
-      { name: '피렌체 비올라', emblem: '⚜️', strength: 82 },
-      { name: '볼로냐 레드블루', emblem: '🛡️', strength: 81 },
-      { name: '토리노 마룬불스', emblem: '🐂', strength: 79 },
-      { name: '제노바 그리폰', emblem: '🦅', strength: 78 },
-      { name: '몬차 레드스피드', emblem: '🏎️', strength: 77 },
-      { name: '베로나 옐로우블루', emblem: '🐕', strength: 76 },
-      { name: '살렌토 울브스', emblem: '🐺', strength: 76 },
-      { name: '프리울리 제브레테', emblem: '🦓', strength: 77 },
-      { name: '사르데냐 아일랜더스', emblem: '🏝️', strength: 76 },
-      { name: '엠폴리 블루즈', emblem: '💙', strength: 75 },
-      { name: '파르마 크루세이더스', emblem: '✝️', strength: 76 },
-      { name: '코모 레이크블루', emblem: '🌊', strength: 76 },
-      { name: '베네치아 윙드라이온', emblem: '🦁', strength: 74 },
-    ],
-  },
-  LIGUE_1: {
-    code: 'LIGUE_1',
-    title: '리그 1 (1부 · 18팀)',
-    teamCount: 18,
-    promoteCount: 0,
-    relegateCount: 2,
-    clubs: [
-      { name: '파리 블루레드', emblem: '🗼', strength: 89 },
-      { name: '모나코 레드화이트', emblem: '👑', strength: 84 },
-      { name: '마르세유 올림피크 블루', emblem: '⭐', strength: 84 },
-      { name: '릴 마스티프 레드', emblem: '🐕', strength: 83 },
-      { name: '리옹 라이온스', emblem: '🦁', strength: 82 },
-      { name: '니스 이글스 레드블랙', emblem: '🦅', strength: 81 },
-      { name: '랑스 골드블러드', emblem: '⛏️', strength: 81 },
-      { name: '렌 브르타뉴 레드', emblem: '🦊', strength: 80 },
-      { name: '브레스트 파이러츠', emblem: '⚓', strength: 80 },
-      { name: '랭스 샴페인 레드', emblem: '🥂', strength: 78 },
-      { name: '툴루즈 바이올렛', emblem: '🟣', strength: 77 },
-      { name: '스트라스부르 블루', emblem: '🦢', strength: 77 },
-      { name: '몽펠리에 오렌지블루', emblem: '🔥', strength: 77 },
-      { name: '낭트 카나리아 그린옐로', emblem: '🐤', strength: 76 },
-      { name: '르아브르 스카이네이비', emblem: '⛵', strength: 75 },
-      { name: '오세르 화이트블루', emblem: '✝️', strength: 75 },
-      { name: '앙제 스쿱 블랙화이트', emblem: '🛡️', strength: 74 },
-      { name: '생테티엔 그린스타즈', emblem: '⭐', strength: 75 },
+      { name: '리즈 화이트', strength: 76 },
+      { name: '번리 클라렛', strength: 75 },
+      { name: '셰필드 블레이즈', strength: 75 },
+      { name: '선덜랜드 블랙캣츠', strength: 74 },
+      { name: '미들즈브러 레드', strength: 74 },
+      { name: '웨스트 브롬 스로슬스', strength: 73 },
+      { name: '노리치 카나리아', strength: 73 },
+      { name: '코번트리 스카이블루', strength: 73 },
+      { name: '블랙번 로버스', strength: 72 },
+      { name: '브리스톨 로빈스', strength: 72 },
+      { name: '왓포드 호넷츠', strength: 72 },
+      { name: '스완지 스완즈', strength: 71 },
+      { name: '밀월 라이온스', strength: 71 },
+      { name: '프레스턴 릴리와이츠', strength: 71 },
+      { name: '퀸즈 파크 후프스', strength: 70 },
+      { name: '스토크 포터스', strength: 70 },
+      { name: '헐 타이거즈', strength: 70 },
+      { name: '카디프 블루버즈', strength: 70 },
+      { name: '더비 램스', strength: 69 },
+      { name: '포츠머스 폼페이', strength: 69 },
+      { name: '옥스퍼드 옐로우스', strength: 68 },
+      { name: '플리머스 필그림스', strength: 68 },
+      { name: '루턴 해터스', strength: 72 },
+      { name: '셰필드 아울스', strength: 69 },
     ],
   },
   KLEAGUE_1: {
     code: 'KLEAGUE_1',
-    title: 'K리그 1 (1부 · 12팀)',
+    title: 'K리그 1 (1부 · 12개 구단)',
     teamCount: 12,
-    promoteCount: 0,
-    relegateCount: 2,
     clubs: [
-      { name: '울산 블루타이거즈', emblem: '🐯', strength: 81 },
-      { name: '김천 피닉스 레드', emblem: '🦅', strength: 79 },
-      { name: '강원 오렌지베어스', emblem: '🐻', strength: 79 },
-      { name: '포항 스틸레드', emblem: '🔥', strength: 79 },
-      { name: '서울 블랙레드', emblem: '👑', strength: 80 },
-      { name: '수원 캐슬블루레드', emblem: '🏰', strength: 78 },
-      { name: '제주 아일랜드 오렌지', emblem: '🍊', strength: 77 },
-      { name: '대전 퍼플시티즌', emblem: '🟣', strength: 78 },
-      { name: '광주 그리핀 옐로우', emblem: '🦅', strength: 78 },
-      { name: '전북 그린워리어스', emblem: '🛡️', strength: 79 },
-      { name: '대구 스카이솔라', emblem: '☀️', strength: 77 },
-      { name: '안양 바이올렛', emblem: '🍇', strength: 76 },
+      { name: '울산 블루타이거즈', strength: 79 },
+      { name: '포항 스틸레드', strength: 77 },
+      { name: '서울 블랙레드', strength: 77 },
+      { name: '강원 오렌지베어스', strength: 76 },
+      { name: '수원 캐슬블루레드', strength: 75 },
+      { name: '김천 밀리터리레드', strength: 76 },
+      { name: '전북 그린워리어스', strength: 77 },
+      { name: '광주 그리핀옐로우', strength: 75 },
+      { name: '제주 아일랜드오렌지', strength: 74 },
+      { name: '대전 퍼플시티즌', strength: 74 },
+      { name: '대구 스카이블루', strength: 73 },
+      { name: '인천 블루블랙', strength: 73 },
     ],
   },
   KLEAGUE_2: {
     code: 'KLEAGUE_2',
-    title: 'K리그 2 (2부 · 14팀)',
+    title: 'K리그 2 (2부 · 14개 구단)',
     teamCount: 14,
-    promoteCount: 2,
-    relegateCount: 0,
     clubs: [
-      { name: '인천 블루블랙 마린', emblem: '⚓', strength: 77 },
-      { name: '수원 블루윙즈', emblem: '🦅', strength: 77 },
-      { name: '부산 로열실드', emblem: '🛡️', strength: 75 },
-      { name: '서울 레오파즈 네이비', emblem: '🐆', strength: 76 },
-      { name: '전남 옐로우드래곤즈', emblem: '🐉', strength: 75 },
-      { name: '부천 헤르메스 레드', emblem: '🏹', strength: 74 },
-      { name: '김포 골든윙즈', emblem: '🦅', strength: 74 },
-      { name: '충남 아산 아울스', emblem: '🦉', strength: 75 },
-      { name: '성남 블랙까치', emblem: '🐦‍⬛', strength: 74 },
-      { name: '경남 로즈레드', emblem: '🌹', strength: 74 },
-      { name: '충북 청주 라이온스', emblem: '🦁', strength: 73 },
-      { name: '안산 그린울브스', emblem: '🐺', strength: 72 },
-      { name: '천안 스카이블루', emblem: '🏛️', strength: 73 },
-      { name: '화성 오렌지포트리스', emblem: '🔥', strength: 72 },
-    ],
-  },
-  MLS_1: {
-    code: 'MLS_1',
-    title: '메이저리그 사커 (MLS · 20팀)',
-    teamCount: 20,
-    promoteCount: 0,
-    relegateCount: 0,
-    clubs: [
-      { name: '마이애미 핑크헤론즈', emblem: '🦩', strength: 83 },
-      { name: '로스앤젤레스 골드블랙', emblem: '🦅', strength: 82 },
-      { name: 'LA 갤럭시 스타즈', emblem: '⭐', strength: 82 },
-      { name: '콜럼버스 골드크루', emblem: '👷', strength: 81 },
-      { name: '신시내티 오렌지라이온', emblem: '🦁', strength: 80 },
-      { name: '시애틀 에메랄드 사운더스', emblem: '🌲', strength: 79 },
-      { name: '뉴욕 시티 스카이블루', emblem: '🗽', strength: 79 },
-      { name: '뉴욕 메트로 레드불스', emblem: '🐂', strength: 79 },
-      { name: '올랜도 퍼플라이온스', emblem: '🦁', strength: 78 },
-      { name: '휴스턴 오렌지다이나모', emblem: '⚡', strength: 78 },
-      { name: '애틀랜타 파이브스트라이프', emblem: '🚂', strength: 78 },
-      { name: '샬럿 크라운 블루', emblem: '👑', strength: 77 },
-      { name: '밴쿠버 화이트캡스', emblem: '🏔️', strength: 77 },
-      { name: '포틀랜드 팀버스 그린', emblem: '🪓', strength: 77 },
-      { name: '솔트레이크 로열클라렛', emblem: '👑', strength: 77 },
-      { name: '미네소타 노스룬즈', emblem: '🦆', strength: 77 },
-      { name: '콜로라도 버건디래피즈', emblem: '🌊', strength: 76 },
-      { name: '댈러스 텍사스 불스', emblem: '🐂', strength: 76 },
-      { name: '세인트루이스 아치 레드', emblem: '🌉', strength: 76 },
-      { name: '토론토 메이플 레즈', emblem: '🍁', strength: 75 },
+      { name: '안양 바이올렛', strength: 73 },
+      { name: '수원 블루윙즈', strength: 74 },
+      { name: '서울 이랜드 레오파즈', strength: 72 },
+      { name: '전남 드래곤즈옐로우', strength: 72 },
+      { name: '부산 아이파크레드', strength: 72 },
+      { name: '충남아산 아울스', strength: 71 },
+      { name: '김포 골든호크스', strength: 70 },
+      { name: '부천 헤르메스레드', strength: 70 },
+      { name: '천안 시티블루', strength: 69 },
+      { name: '충북청주 라이온스', strength: 69 },
+      { name: '성남 블랙까치', strength: 70 },
+      { name: '안산 그린울브스', strength: 68 },
+      { name: '경남 로즈레드', strength: 69 },
+      { name: '화성 오렌지FC', strength: 68 },
     ],
   },
 };
 
-function detectLeagueConfigForClub(clubName = '', division = 1) {
-  const clean = String(clubName).trim();
-  for (const cfg of Object.values(REAL_LEAGUE_CONFIGS)) {
-    if (cfg.clubs.some((c) => clean.includes(c.name) || c.name.includes(clean))) {
-      if (cfg.code === 'EPL_1' && division >= 2) return REAL_LEAGUE_CONFIGS.EFL_2;
-      if (cfg.code === 'EFL_2' && division === 1) return REAL_LEAGUE_CONFIGS.EPL_1;
-      if (cfg.code === 'KLEAGUE_1' && division >= 2) return REAL_LEAGUE_CONFIGS.KLEAGUE_2;
-      if (cfg.code === 'KLEAGUE_2' && division === 1) return REAL_LEAGUE_CONFIGS.KLEAGUE_1;
-      return cfg;
-    }
+function detectLeagueConfigForClub(clubName, division) {
+  const name = String(clubName || '');
+  const isKoreanClub = [
+    '울산', '포항', '서울', '전북', '수원', '강원', '김천', '광주', '제주', '대전', '대구', '인천', '성남', '부산', '전남', '안양',
+  ].some((kw) => name.includes(kw));
+  if (isKoreanClub) {
+    return division === 1 ? REAL_LEAGUE_CONFIGS.KLEAGUE_1 : REAL_LEAGUE_CONFIGS.KLEAGUE_2;
   }
-  if (division === 1) return REAL_LEAGUE_CONFIGS.EPL_1;
-  if (division === 2) return REAL_LEAGUE_CONFIGS.EFL_2;
-  return REAL_LEAGUE_CONFIGS.BUNDES_1;
+  return division === 1 ? REAL_LEAGUE_CONFIGS.EPL_1 : REAL_LEAGUE_CONFIGS.EFL_2;
 }
 
-function simulateOpponentFatigueAndRotation(oppObj, currentRound = 1) {
-  if (!oppObj || !Array.isArray(oppObj.starters)) return oppObj;
-  const starters = oppObj.starters.map((p) => ({ ...p }));
-  const bench = Array.isArray(oppObj.bench) ? oppObj.bench.map((p) => ({ ...p })) : [];
-
-  for (let i = 0; i < starters.length; i++) {
-    const starter = starters[i];
-    const isGk = starter.mainPosition === 'GK' || starter.preferredRoleCode === 'GK';
-    const hash = Math.abs((starter.name?.charCodeAt(0) || 10) * 17 + currentRound * 23 + i * 13);
-    const simulatedStamina = isGk
-      ? 82 + (hash % 18)
-      : Math.max(22, 100 - ((hash % 68) + (currentRound > 1 ? 10 : 0)));
-
-    starter.stamina = simulatedStamina;
-    starter.currentStamina = simulatedStamina;
-
-    if (simulatedStamina <= 30 && bench.length > 0) {
-      const benchIdx = bench.findIndex(
-        (b) => b.mainPosition === starter.mainPosition && (b.stamina ?? 100) > 70
-      );
-      if (benchIdx >= 0) {
-        const subIn = {
-          ...bench[benchIdx],
-          preferredRoleCode: starter.preferredRoleCode,
-          roleCodes: starter.roleCodes,
-          stamina: 92 + (hash % 8),
-          currentStamina: 92 + (hash % 8),
-        };
-        bench[benchIdx] = { ...starter };
-        starters[i] = subIn;
-      } else {
-        starter.stamina = 58;
-        starter.currentStamina = 58;
-      }
-    }
-  }
-  return { ...oppObj, starters, bench };
-}
-
-function simulateScore(sA, sB, rng) {
-  const ratio = clamp(sA / Math.max(40, sB), 0.55, 1.85);
-  return [
-    rng.poisson(clamp(1.25 * 1.05 * ratio ** 2, 0.2, 3.8)),
-    rng.poisson(clamp(1.25 / ratio ** 2, 0.2, 3.8)),
-  ];
-}
-
-function resolveTie(sA, sB, rng) {
-  const ratio = clamp(sA / Math.max(40, sB), 0.6, 1.7);
-  const et = [rng.poisson(clamp(0.4 * ratio ** 2, 0.1, 1.5)), rng.poisson(clamp(0.4 / ratio ** 2, 0.1, 1.5))];
-  if (et[0] !== et[1]) return { et, pens: null, winner: et[0] > et[1] ? 'A' : 'B' };
-  const pA = clamp(0.74 + (ratio - 1) * 0.2, 0.55, 0.9);
-  const pB = clamp(0.74 + (1 / ratio - 1) * 0.2, 0.55, 0.9);
-  let a = 0;
-  let b = 0;
-  for (let i = 0; i < 5; i++) {
-    if (rng.next() < pA) a++;
-    if (rng.next() < pB) b++;
-  }
-  let round = 0;
-  while (a === b && round < 10) {
-    if (rng.next() < pA) a++;
-    if (rng.next() < pB) b++;
-    round++;
-  }
-  if (a === b) {
-    if (rng.next() < 0.5) a++;
-    else b++;
-  }
-  return { et, pens: [a, b], winner: a > b ? 'A' : 'B' };
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
 }
 
 function newRow(team) {
-  return { id: team.id, name: team.name, emblem: team.emblem, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+  return {
+    id: team.id,
+    code: team.code || team.id,
+    name: team.name,
+    emblem: team.emblem,
+    confed: team.confed || null,
+    p: 0,
+    w: 0,
+    d: 0,
+    l: 0,
+    gf: 0,
+    ga: 0,
+    gd: 0,
+    pts: 0,
+  };
 }
 
 function recordResult(table, aId, bId, ga, gb) {
   const a = table[aId];
   const b = table[bId];
   if (!a || !b) return;
-  a.p++;
-  b.p++;
+  a.p += 1;
+  b.p += 1;
   a.gf += ga;
   a.ga += gb;
+  a.gd = a.gf - a.ga;
   b.gf += gb;
   b.ga += ga;
+  b.gd = b.gf - b.ga;
   if (ga > gb) {
-    a.w++;
-    b.l++;
+    a.w += 1;
+    b.l += 1;
     a.pts += LEAGUE.POINTS.WIN;
   } else if (ga < gb) {
-    b.w++;
-    a.l++;
+    b.w += 1;
+    a.l += 1;
     b.pts += LEAGUE.POINTS.WIN;
   } else {
-    a.d++;
-    b.d++;
+    a.d += 1;
+    b.d += 1;
     a.pts += LEAGUE.POINTS.DRAW;
     b.pts += LEAGUE.POINTS.DRAW;
   }
 }
 
-function rankRows(rows) {
+export function rankRows(rows) {
   return [...rows]
-    .sort((x, y) => y.pts - x.pts || y.gf - y.ga - (x.gf - x.ga) || y.gf - x.gf || x.name.localeCompare(y.name))
-    .map((row, i) => ({ ...row, rank: i + 1, gd: row.gf - row.ga }));
+    .sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || String(a.id).localeCompare(String(b.id)))
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-function scaleReward(baseReward, tierLevel = 1) {
+function sampleGoals(rng, lambda) {
+  let acc = Math.exp(-lambda);
+  let k = 0;
+  const u = rng.next();
+  let p = Math.exp(-lambda);
+  while (u > acc && k < 6) {
+    k += 1;
+    p *= lambda / k;
+    acc += p;
+  }
+  return k;
+}
+
+export function simulateScore(strengthA, strengthB, rng) {
+  const diff = (strengthA - strengthB) / 14;
+  const lambdaA = Math.max(0.3, Math.min(3.2, 1.3 + diff));
+  const lambdaB = Math.max(0.3, Math.min(3.2, 1.3 - diff));
+  return [sampleGoals(rng, lambdaA), sampleGoals(rng, lambdaB)];
+}
+
+function scaleReward(reward, tierLevel = 1) {
   const mult = Math.pow(1.35, Math.max(0, tierLevel - 1));
   return {
-    gold: Math.round((baseReward?.gold || 0) * mult),
-    cashFree: Math.round((baseReward?.cashFree || 0) * mult),
+    gold: Math.round((reward?.gold || 0) * mult),
+    cashFree: Math.round((reward?.cashFree || 0) * mult),
   };
 }
+
+function pairUp(ids) {
+  const matches = [];
+  for (let i = 0; i < ids.length; i += 2) {
+    matches.push({ a: ids[i], b: ids[i + 1], ga: null, gb: null, winner: null, penaltyNote: null });
+  }
+  return matches;
+}
+
+function knockoutNext(userId, state, prefix, title) {
+  const userIdKey = state.userTeamId || 'USER';
+  const round = state.rounds[state.roundIndex];
+  const match = round.matches.find((m) => m.a === userIdKey || m.b === userIdKey) || round.matches[0];
+  const oppId = match.a === userIdKey ? match.b : match.a;
+  const opp = state.teams[oppId];
+  const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
+  return {
+    ref: `${prefix}:${state.roundIndex}`,
+    label: `${title}${tierNote} ${round.name}`,
+    opponentSpec: {
+      seed: `${prefix}:${userId}:${state.roundIndex}`,
+      name: opp.name,
+      strength: opp.strength,
+      isNationalTeam: prefix === 'WK',
+    },
+  };
+}
+
+function knockoutSummary(userMatch, roundName) {
+  return {
+    roundName,
+    userScore: { a: userMatch.ga, b: userMatch.gb },
+    penaltyNote: userMatch.penaltyNote,
+  };
+}
+
+function playKnockoutRound(state, userGoals, oppGoals, userStrength, rng) {
+  const userIdKey = state.userTeamId || 'USER';
+  const round = state.rounds[state.roundIndex];
+  const winners = [];
+  let userMatch = null;
+  let userWon = false;
+
+  for (const m of round.matches) {
+    if (m.a === userIdKey || m.b === userIdKey) {
+      const userIsA = m.a === userIdKey;
+      m.ga = userIsA ? userGoals : oppGoals;
+      m.gb = userIsA ? oppGoals : userGoals;
+      const oppId = userIsA ? m.b : m.a;
+      if (m.ga > m.gb) {
+        m.winner = m.a;
+      } else if (m.gb > m.ga) {
+        m.winner = m.b;
+      } else {
+        const oppStrength = state.teams[oppId].strength;
+        const winChance = clamp(0.5 + (userStrength - oppStrength) * 0.02, 0.25, 0.75);
+        userWon = rng.next() < winChance;
+        m.winner = userWon ? userIdKey : oppId;
+        m.penaltyNote = `승부차기 ${userWon ? '승' : '패'}`;
+      }
+      userWon = m.winner === userIdKey;
+      userMatch = m;
+    } else {
+      const [ga, gb] = simulateScore(state.teams[m.a].strength, state.teams[m.b].strength, rng);
+      m.ga = ga;
+      m.gb = gb;
+      if (ga !== gb) {
+        m.winner = ga > gb ? m.a : m.b;
+      } else {
+        m.winner = rng.next() < 0.5 ? m.a : m.b;
+        m.penaltyNote = '승부차기';
+      }
+    }
+    winners.push(m.winner);
+  }
+
+  const isFinal = state.roundIndex >= state.roundNames.length - 1;
+  if (!userWon) {
+    state.eliminatedAt = round.name;
+    state.champion = winners[0];
+    return { roundName: round.name, userMatch, userWon: false, champion: false, eliminated: true };
+  }
+  if (isFinal) {
+    state.champion = userIdKey;
+    return { roundName: round.name, userMatch, userWon: true, champion: true, eliminated: false };
+  }
+  state.roundIndex += 1;
+  state.rounds.push({ name: state.roundNames[state.roundIndex], matches: pairUp(winners) });
+  return { roundName: round.name, userMatch, userWon: true, champion: false, eliminated: false };
+}
+
+function checkEarlyTitleClinch(standings, currentRound, totalRounds) {
+  if (!Array.isArray(standings) || standings.length < 2) return { clinched: false, winnerId: null };
+  const remainingMatches = Math.max(0, totalRounds - currentRound);
+  const maxPossibleGain = remainingMatches * 3;
+  const first = standings[0];
+  const second = standings[1];
+  if (first.pts - second.pts > maxPossibleGain) {
+    return { clinched: true, winnerId: first.id, winnerName: first.name, remainingMatches };
+  }
+  return { clinched: false, winnerId: null };
+}
+
+/* ------------------------------------------------------------------ */
+/* 1. 리그 핸들러                                                       */
+/* ------------------------------------------------------------------ */
 
 const leagueHandler = {
   create({ userId, club, prev }) {
@@ -407,14 +341,12 @@ const leagueHandler = {
     const division = prev?.nextDivision ?? LEAGUE.START_DIVISION;
     const prevTitles = prev?.titlesWon || 0;
     const tierLevel = prev?.finalRank === 1 ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
-    // 난이도 단계(tierLevel)에 비례해 상대 구단 능력치(+3씩) 상승
     const difficultyBoost = (tierLevel - 1) * 3;
     const rng = createRng(`league:${userId}:${season}:${division}`);
 
     const leagueCfg = detectLeagueConfigForClub(club.name, division);
     const totalTeams = leagueCfg.teamCount;
 
-    // 이전 시즌 강등된 팀을 제외하고 2부에서 승격한 팀을 합류시킴
     const relegatedSet = new Set(prev?.relegatedClubNames || []);
     const promotedList = Array.isArray(prev?.promotedClubNames) ? prev.promotedClubNames : [];
 
@@ -491,6 +423,7 @@ const leagueHandler = {
       nextDivision: division,
       relegatedClubNames: [],
       promotedClubNames: [],
+      earlyTitleClinched: false,
     };
   },
 
@@ -507,7 +440,7 @@ const leagueHandler = {
     };
   },
 
- apply({ userId, state, userGoals, oppGoals }) {
+  apply({ userId, state, userGoals, oppGoals }) {
     const round = state.round;
     const rng = createRng(`lg-sim:${userId}:${state.season}:${round}`);
     const results = [];
@@ -527,7 +460,6 @@ const leagueHandler = {
     const standings = rankRows(Object.values(state.table));
     const me = standings.find((r) => r.id === 'USER');
 
-    // 조기 우승 확정(Early Title Clinch) 여부 계산
     const clinchInfo = checkEarlyTitleClinch(standings, round, state.totalRounds);
     const newlyClinchedByUser = clinchInfo.clinched && clinchInfo.winnerId === 'USER' && !state.earlyTitleClinched;
     if (clinchInfo.clinched && clinchInfo.winnerId === 'USER') {
@@ -548,7 +480,7 @@ const leagueHandler = {
       results,
       earlyTitleClinched: Boolean(state.earlyTitleClinched),
       newlyClinchedByUser,
-      champion: newlyClinchedByUser, // 조기 우승 확정 시에도 즉시 우승 세레머니 이펙트 표시
+      champion: newlyClinchedByUser,
     };
 
     let reward = { gold: 0, cashFree: 0 };
@@ -606,115 +538,44 @@ const leagueHandler = {
   },
 
   overview(state, status) {
-      const title = state.leagueTitle || `${state.division}부 리그`;
-      const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
-      if (status === 'FINISHED') return `시즌 ${state.season}${tierBadge} 종료 · ${title} ${state.finalRank}위`;
-      const me = rankRows(Object.values(state.table || {})).find((r) => r.id === 'USER');
-      const currentRound = Math.min(state.round || 1, state.totalRounds || 38);
-      const clinchTag = state.earlyTitleClinched ? ' · 🏆 조기 우승 확정' : '';
-      return `${title}${tierBadge} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위${clinchTag}`;
-   },
+    const title = state.leagueTitle || `${state.division}부 리그`;
+    const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
+    if (status === 'FINISHED') return `시즌 ${state.season}${tierBadge} 종료 · ${title} ${state.finalRank}위`;
+    const me = rankRows(Object.values(state.table || {})).find((r) => r.id === 'USER');
+    const currentRound = Math.min(state.round || 1, state.totalRounds || 38);
+    const clinchTag = state.earlyTitleClinched ? ' · 🏆 조기 우승 확정' : '';
+    return `${title}${tierBadge} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위${clinchTag}`;
+  },
 };
 
-function pairUp(ids) {
-  const matches = [];
-  for (let i = 0; i < ids.length; i += 2) {
-    matches.push({ a: ids[i], b: ids[i + 1], ga: null, gb: null, et: null, pens: null, winner: null });
-  }
-  return matches;
-}
-
-function strengthOf(state, id, userStrength) {
-  return id === 'USER' ? userStrength : state.teams[id].strength;
-}
-
-function settleMatch(match, state, userStrength, rng) {
-  if (match.ga === match.gb) {
-    const tie = resolveTie(strengthOf(state, match.a, userStrength), strengthOf(state, match.b, userStrength), rng);
-    match.et = tie.et;
-    match.pens = tie.pens;
-    match.winner = tie.winner === 'A' ? match.a : match.b;
-  } else {
-    match.winner = match.ga > match.gb ? match.a : match.b;
-  }
-}
-
-function playKnockoutRound(state, userGoals, oppGoals, userStrength, rng) {
-  const round = state.rounds[state.roundIndex];
-  const userMatch = round.matches.find((m) => m.winner === null && (m.a === 'USER' || m.b === 'USER'));
-  [userMatch.ga, userMatch.gb] = userMatch.a === 'USER' ? [userGoals, oppGoals] : [oppGoals, userGoals];
-  settleMatch(userMatch, state, userStrength, rng);
-
-  for (const m of round.matches) {
-    if (m.winner !== null) continue;
-    [m.ga, m.gb] = simulateScore(strengthOf(state, m.a, userStrength), strengthOf(state, m.b, userStrength), rng);
-    settleMatch(m, state, userStrength, rng);
-  }
-
-  const userWon = userMatch.winner === 'USER';
-  const isFinal = round.matches.length === 1;
-  let champion = false;
-  if (userWon && isFinal) {
-    champion = true;
-    state.champion = 'USER';
-  } else if (userWon) {
-    state.rounds.push({ name: state.roundNames[state.roundIndex + 1], matches: pairUp(round.matches.map((m) => m.winner)) });
-    state.roundIndex += 1;
-  } else {
-    state.eliminatedAt = round.name;
-    let current = round;
-    while (current.matches.length > 1) {
-      const next = { name: state.roundNames[state.rounds.length], matches: pairUp(current.matches.map((m) => m.winner)) };
-      for (const m of next.matches) {
-        [m.ga, m.gb] = simulateScore(strengthOf(state, m.a, userStrength), strengthOf(state, m.b, userStrength), rng);
-        settleMatch(m, state, userStrength, rng);
-      }
-      state.rounds.push(next);
-      current = next;
-    }
-    state.champion = current.matches[0].winner;
-  }
-  return { userMatch, roundName: round.name, userWon, champion, eliminated: !userWon };
-}
-
-function knockoutSummary(match, roundName) {
-  return { roundName, match, pens: match.pens, extraTime: match.et };
-}
-
-function knockoutNext(userId, state, refPrefix, label) {
-  const round = state.rounds[state.roundIndex];
-  const match = round.matches.find((m) => m.winner === null && (m.a === 'USER' || m.b === 'USER'));
-  const oppId = match.a === 'USER' ? match.b : match.a;
-  const opp = state.teams[oppId];
-  const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
-  return {
-    ref: `${refPrefix}:${state.roundIndex}`,
-    label: `${label}${tierNote} ${round.name}`,
-    opponentSpec: { seed: `${refPrefix}:${userId}:${state.roundIndex}:${oppId}`, name: opp.name, strength: opp.strength },
-  };
-}
+/* ------------------------------------------------------------------ */
+/* 2. 챔피언스 컵 핸들러                                                */
+/* ------------------------------------------------------------------ */
 
 const cupHandler = {
   create({ userId, club, prev }) {
     const tierLevel = prev?.champion === 'USER' ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
     const titlesWon = (prev?.titlesWon || 0) + (prev?.champion === 'USER' ? 1 : 0);
-    const difficultyBoost = (tierLevel - 1) * 2;
-    const rng = createRng(`cup:${userId}:${Math.floor(Date.now() / 4096)}`);
-    const names = rng.shuffle(AI_CLUB_NAMES.CHAMPIONS_CUP);
-    const teams = { USER: { id: 'USER', name: club.name, emblem: club.emblemIcon, strength: null } };
+    const difficultyBoost = (tierLevel - 1) * 3;
+    const rng = createRng(`cup:${userId}:${Date.now()}`);
+    const names = rng.shuffle(AI_CLUB_NAMES.CHAMPIONS_CUP).slice(0, 15);
+    const teams = {
+      USER: { id: 'USER', name: club.name, emblem: club.emblemIcon, strength: null },
+    };
     names.forEach((name, i) => {
       const id = `T${i + 1}`;
       teams[id] = {
         id,
         name,
         emblem: emblemFor(name),
-        strength: clamp(rng.int(CUP.STRENGTH_RANGE[0], CUP.STRENGTH_RANGE[1]) + difficultyBoost, 65, 97),
+        strength: clamp(rng.int(CUP.STRENGTH_RANGE[0], CUP.STRENGTH_RANGE[1]) + difficultyBoost, 72, 97),
       };
     });
-    const order = rng.shuffle(Object.keys(teams));
+    const order = ['USER', ...rng.shuffle(Object.keys(teams).filter((id) => id !== 'USER'))];
     return {
       tierLevel,
       titlesWon,
+      userTeamId: 'USER',
       teams,
       roundNames: CUP.ROUND_NAMES,
       rounds: [{ name: CUP.ROUND_NAMES[0], matches: pairUp(order) }],
@@ -724,11 +585,13 @@ const cupHandler = {
     };
   },
 
-  next: (userId, state) => knockoutNext(userId, state, 'C', '챔피언스 컵'),
+  next(userId, state) {
+    return knockoutNext(userId, state, 'C', '챔피언스 컵');
+  },
 
   apply({ userId, state, userGoals, oppGoals, userStrength }) {
     const rng = createRng(`cup-sim:${userId}:${state.roundIndex}:${userGoals}-${oppGoals}`);
-    const roundIndexBefore = state.roundIndex;
+    const before = state.roundIndex;
     const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng);
     const summary = {
       type: 'CUP',
@@ -739,71 +602,186 @@ const cupHandler = {
       eliminated: r.eliminated,
       rounds: state.rounds,
     };
-    // 우승 시 대규모 챔피언 보너스 + 난이도 단계(tierLevel) 배율 적용
-    const baseRoundReward = r.champion
-      ? { gold: 25000, cashFree: 400 }
-      : r.userWon
-      ? CUP.ROUND_WIN_REWARD[roundIndexBefore] || { gold: 4000, cashFree: 50 }
-      : CUP.ELIMINATED_REWARD;
-    const reward = scaleReward(baseRoundReward, state.tierLevel || 1);
-    return { state, summary, reward, finished: r.champion || r.eliminated };
+    const baseReward = r.userWon ? CUP.ROUND_WIN_REWARD[before] : CUP.ELIMINATED_REWARD;
+    return { state, summary, reward: scaleReward(baseReward, state.tierLevel || 1), finished: r.champion || r.eliminated };
   },
 
   overview(state, status) {
-    const tierBadge = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
+    const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
     if (status === 'FINISHED') {
-      return state.champion === 'USER'
-        ? `🏆 챔피언스 컵 우승!${tierBadge} (다음 도전 시 난이도·보상 상승)`
-        : `${state.eliminatedAt}에서 탈락${tierBadge}`;
+      return state.champion === 'USER' ? `🏆 챔피언스 컵 우승${tierBadge}` : `${state.eliminatedAt}에서 탈락${tierBadge}`;
     }
     return `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
   },
 };
 
-const GROUP_MATCHDAYS = [
-  [[0, 1], [2, 3]],
-  [[0, 2], [1, 3]],
-  [[0, 3], [1, 2]],
-];
+/* ------------------------------------------------------------------ */
+/* 3. 2026 월드컵 48개국 핸들러 (백트래킹 대륙 배정 + 조편성 후 국가 선택) */
+/* ------------------------------------------------------------------ */
+
+function drawWorldCupGroupsStrict(teamsMap, rng) {
+  const groupKeys = WORLD_CUP.GROUPS;
+  const groups = Object.fromEntries(groupKeys.map((g) => [g, []]));
+
+  const allTeams = Object.values(teamsMap);
+  const pot1 = allTeams.filter((t) => t.pot === 1);
+  const pot2 = rng.shuffle(allTeams.filter((t) => t.pot === 2));
+  const pot3 = rng.shuffle(allTeams.filter((t) => t.pot === 3));
+  const pot4 = rng.shuffle(allTeams.filter((t) => t.pot === 4));
+
+  const hostPlaced = new Set();
+  for (const t of pot1) {
+    if (t.hostGroup && groups[t.hostGroup].length === 0) {
+      groups[t.hostGroup].push(t.id);
+      hostPlaced.add(t.id);
+    }
+  }
+  const remPot1 = rng.shuffle(pot1.filter((t) => !hostPlaced.has(t.id)));
+  let p1Idx = 0;
+  for (const g of groupKeys) {
+    if (groups[g].length === 0 && remPot1[p1Idx]) {
+      groups[g].push(remPot1[p1Idx].id);
+      p1Idx++;
+    }
+  }
+
+  const canPlace = (groupArr, candidateTeam) => {
+    const confed = candidateTeam.confed;
+    let sameConfedCount = 0;
+    for (const tid of groupArr) {
+      if (teamsMap[tid]?.confed === confed) sameConfedCount++;
+    }
+    if (confed === 'UEFA') return sameConfedCount < 2;
+    return sameConfedCount < 1;
+  };
+
+  const assignPotWithBacktracking = (potTeams) => {
+    const usedTeamIndices = new Array(potTeams.length).fill(false);
+
+    const backtrack = (groupIdx) => {
+      if (groupIdx >= groupKeys.length) return true;
+      const gKey = groupKeys[groupIdx];
+
+      for (let ti = 0; ti < potTeams.length; ti++) {
+        if (usedTeamIndices[ti]) continue;
+        const candidate = potTeams[ti];
+        if (!canPlace(groups[gKey], candidate)) continue;
+
+        usedTeamIndices[ti] = true;
+        groups[gKey].push(candidate.id);
+
+        if (backtrack(groupIdx + 1)) return true;
+
+        groups[gKey].pop();
+        usedTeamIndices[ti] = false;
+      }
+      return false;
+    };
+
+    backtrack(0);
+  };
+
+  assignPotWithBacktracking(pot2);
+  assignPotWithBacktracking(pot3);
+  assignPotWithBacktracking(pot4);
+
+  return groups;
+}
+
+function buildWorldCupRoundOf32Matches(groupStandings) {
+  const winners = [];
+  const runnersUp = [];
+  const thirdPlaces = [];
+
+  for (const g of WORLD_CUP.GROUPS) {
+    const rows = groupStandings[g] || [];
+    if (rows[0]) winners.push({ id: rows[0].id, group: g });
+    if (rows[1]) runnersUp.push({ id: rows[1].id, group: g });
+    if (rows[2]) thirdPlaces.push({ ...rows[2], group: g });
+  }
+
+  const bestEightThirds = rankRows(thirdPlaces)
+    .slice(0, 8)
+    .map((r) => ({ id: r.id, group: r.group }));
+
+  const poolA = [...winners, ...runnersUp.slice(0, 4)];
+  const poolB = [...runnersUp.slice(4), ...bestEightThirds];
+
+  const usedB = new Array(poolB.length).fill(false);
+  const pairedB = new Array(poolA.length).fill(null);
+
+  const solvePairing = (idxA) => {
+    if (idxA >= poolA.length) return true;
+    const teamA = poolA[idxA];
+    for (let bi = 0; bi < poolB.length; bi++) {
+      if (usedB[bi]) continue;
+      if (poolB[bi].group === teamA.group) continue;
+      usedB[bi] = true;
+      pairedB[idxA] = poolB[bi];
+      if (solvePairing(idxA + 1)) return true;
+      pairedB[idxA] = null;
+      usedB[bi] = false;
+    }
+    return false;
+  };
+
+  if (!solvePairing(0)) {
+    for (let i = 0; i < poolA.length; i++) pairedB[i] = poolB[i];
+  }
+
+  const matches = poolA.map((teamA, i) => ({
+    a: teamA.id,
+    b: pairedB[i].id,
+    ga: null,
+    gb: null,
+    winner: null,
+    penaltyNote: null,
+  }));
+
+  return {
+    matches,
+    qualifiers: [...poolA.map((x) => x.id), ...poolB.map((x) => x.id)],
+  };
+}
 
 const worldCupHandler = {
-  create({ userId, club, prev }) {
-    const tierLevel = prev?.champion === 'USER' ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
-    const titlesWon = (prev?.titlesWon || 0) + (prev?.champion === 'USER' ? 1 : 0);
+  create({ userId, prev, selectedNationCode }) {
+    const tierLevel = prev?.champion && prev?.champion === prev?.userTeamId ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
+    const titlesWon = (prev?.titlesWon || 0) + (prev?.champion && prev?.champion === prev?.userTeamId ? 1 : 0);
     const difficultyBoost = (tierLevel - 1) * 3;
-    const rng = createRng(`wc48:${userId}:${Math.floor(Date.now() / 4096)}`);
+    const rng = createRng(`wc48-strict:${userId}:${Date.now()}`);
 
-    // 48개국 구성 (유저 팀 1개 + AI 47개국)
-    const allNations = rng.shuffle(AI_CLUB_NAMES.WORLD_CUP).slice(0, 47);
-    const teams = {
-      USER: { id: 'USER', name: `${club.name}`, emblem: club.emblemIcon, strength: null },
-    };
-    allNations.forEach((name, i) => {
-      const id = `T${i + 1}`;
-      teams[id] = {
-        id,
-        name,
-        emblem: emblemFor(name),
-        strength: clamp(rng.int(WORLD_CUP.STRENGTH_RANGE[0], WORLD_CUP.STRENGTH_RANGE[1]) + difficultyBoost, 70, 97),
+    const teams = {};
+    for (const meta of WORLD_CUP_NATIONS_META) {
+      const codeKey = meta.code || meta.name;
+      teams[codeKey] = {
+        id: codeKey,
+        code: codeKey,
+        name: meta.name,
+        emblem: emblemFor(meta.name),
+        confed: meta.confed,
+        pot: meta.pot,
+        hostGroup: meta.hostGroup || null,
+        strength: clamp(meta.strength + difficultyBoost + rng.int(-1, 2), 70, 97),
       };
-    });
+    }
 
-    const aiIds = rng.shuffle(Object.keys(teams).filter((id) => id !== 'USER'));
-    const groups = {};
-    // 12개 조(A~L)에 4개국씩 총 48개국 배정
-    WORLD_CUP.GROUPS.forEach((g, gi) => {
-      groups[g] = gi === 0 ? ['USER', ...aiIds.slice(0, 3)] : aiIds.slice(3 + (gi - 1) * 4, 3 + gi * 4);
-    });
+    const groups = drawWorldCupGroupsStrict(teams, rng);
+    const userTeamId = teams[selectedNationCode] ? selectedNationCode : 'KOR';
+    const userGroup = WORLD_CUP.GROUPS.find((g) => groups[g]?.includes(userTeamId)) || 'A';
 
     return {
       tierLevel,
       titlesWon,
+      userTeamId,
+      userGroup,
+      nationLocked: false,
       teams,
       groups,
       table: Object.fromEntries(Object.keys(teams).map((id) => [id, newRow(teams[id])])),
       phase: 'GROUP',
       matchday: 1,
-      roundNames: WORLD_CUP.KNOCKOUT_NAMES, // ['32강', '16강', '8강', '4강', '결승']
+      roundNames: WORLD_CUP.KNOCKOUT_NAMES,
       rounds: [],
       roundIndex: 0,
       eliminatedAt: null,
@@ -813,17 +791,27 @@ const worldCupHandler = {
 
   next(userId, state) {
     if (state.phase === 'KNOCKOUT') return knockoutNext(userId, state, 'WK', '2026 월드컵');
-    const oppId = state.groups.A[state.matchday];
-    const opp = state.teams[oppId];
+    const userIdKey = state.userTeamId && state.teams?.[state.userTeamId] ? state.userTeamId : Object.keys(state.teams)[0];
+    const uGroup = state.userGroup || WORLD_CUP.GROUPS.find((g) => state.groups[g]?.includes(userIdKey)) || 'A';
+    const groupArr = state.groups[uGroup] || state.groups.A;
+    const mdIdx = Math.max(0, Math.min(2, (state.matchday || 1) - 1));
+    const mdPairs = GROUP_MATCHDAYS[mdIdx];
+    const myPair = mdPairs.find(([i, j]) => groupArr[i] === userIdKey || groupArr[j] === userIdKey) || mdPairs[0];
+    const oppId = groupArr[myPair[0]] === userIdKey ? groupArr[myPair[1]] : groupArr[myPair[0]];
+    const opp = state.teams[oppId] || Object.values(state.teams).find((t) => t.id !== userIdKey);
     const tierNote = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
+
     return {
       ref: `WG:${state.matchday}`,
-      label: `2026 월드컵 (48개국)${tierNote} 조별리그 ${state.matchday}차전`,
-      opponentSpec: { seed: `wg:${userId}:${state.matchday}`, name: opp.name, strength: opp.strength, isNationalTeam: true },
+      label: `2026 월드컵 ${uGroup}조${tierNote} 조별리그 ${state.matchday}차전 (${state.teams[userIdKey]?.name || '대표팀'} vs ${opp.name})`,
+      opponentSpec: { seed: `wg:${userId}:${state.matchday}:${opp.id}`, name: opp.name, strength: opp.strength, isNationalTeam: true },
     };
   },
 
   apply({ userId, state, userGoals, oppGoals, userStrength }) {
+    const userIdKey = state.userTeamId || 'KOR';
+    state.nationLocked = true;
+
     if (state.phase === 'KNOCKOUT') {
       const rng = createRng(`wk-sim:${userId}:${state.roundIndex}:${userGoals}-${oppGoals}`);
       const before = state.roundIndex;
@@ -855,13 +843,15 @@ const worldCupHandler = {
     const rng = createRng(`wg-sim:${userId}:${md}`);
     const results = [];
     for (const g of WORLD_CUP.GROUPS) {
+      if (!Array.isArray(state.groups[g])) continue;
       for (const [i, j] of GROUP_MATCHDAYS[md - 1]) {
         const a = state.groups[g][i];
         const b = state.groups[g][j];
+        if (!a || !b) continue;
         let ga;
         let gb;
-        if (a === 'USER') [ga, gb] = [userGoals, oppGoals];
-        else if (b === 'USER') [ga, gb] = [oppGoals, userGoals];
+        if (a === userIdKey) [ga, gb] = [userGoals, oppGoals];
+        else if (b === userIdKey) [ga, gb] = [oppGoals, userGoals];
         else [ga, gb] = simulateScore(state.teams[a].strength, state.teams[b].strength, rng);
         recordResult(state.table, a, b, ga, gb);
         results.push({ group: g, a, b, ga, gb });
@@ -870,88 +860,82 @@ const worldCupHandler = {
     state.matchday += 1;
 
     const groupStandings = Object.fromEntries(
-      WORLD_CUP.GROUPS.map((g) => [g, rankRows(state.groups[g].map((id) => state.table[id]))])
+      WORLD_CUP.GROUPS.filter((g) => Array.isArray(state.groups[g])).map((g) => [
+        g,
+        rankRows(state.groups[g].map((id) => state.table[id]).filter(Boolean)),
+      ])
     );
+    const uGroup = state.userGroup || WORLD_CUP.GROUPS.find((g) => state.groups[g]?.includes(userIdKey)) || 'A';
+    const userGroupRank = groupStandings[uGroup]?.find((r) => r.id === userIdKey)?.rank || 1;
+
     const summary = {
       type: 'WORLD_CUP',
       phase: 'GROUP',
       tierLevel: state.tierLevel || 1,
       matchday: md,
+      userGroup: uGroup,
+      userTeamId: userIdKey,
       results,
       groupStandings,
-      userGroupRank: groupStandings.A.find((r) => r.id === 'USER').rank,
+      userGroupRank,
     };
     if (md < 3) return { state, summary, reward: { gold: 0, cashFree: 0 }, finished: false };
 
-    // 2026 월드컵 48개국 32강 진출 방식:
-    // 각 조 1, 2위(24개국) + 조 3위 중 성적 상위 8개국 = 총 32개국 토너먼트 진출!
-    const topTwoIds = [];
-    const thirdPlaceRows = [];
-    for (const g of WORLD_CUP.GROUPS) {
-      const rows = groupStandings[g];
-      topTwoIds.push(rows[0].id, rows[1].id);
-      if (rows[2]) thirdPlaceRows.push(rows[2]);
-    }
-    const bestEightThirds = rankRows(thirdPlaceRows)
-      .slice(0, 8)
-      .map((r) => r.id);
-
-    const all32Qualifiers = [...topTwoIds, ...bestEightThirds];
-    summary.advanced = all32Qualifiers.includes('USER');
+    const { matches, qualifiers } = buildWorldCupRoundOf32Matches(groupStandings);
+    summary.advanced = qualifiers.includes(userIdKey);
 
     if (!summary.advanced) {
-      state.eliminatedAt = '48개국 조별리그';
-      state.champion = topTwoIds[0];
+      state.eliminatedAt = `48개국 조별리그 (${uGroup}조 ${userGroupRank}위)`;
+      state.champion = qualifiers[0];
       return { state, summary, reward: scaleReward(WORLD_CUP.ELIMINATED_REWARD, state.tierLevel || 1), finished: true };
     }
 
     state.phase = 'KNOCKOUT';
-    state.rounds = [{ name: WORLD_CUP.KNOCKOUT_NAMES[0], matches: pairUp(all32Qualifiers) }];
+    state.rounds = [{ name: WORLD_CUP.KNOCKOUT_NAMES[0], matches }];
     state.roundIndex = 0;
     return { state, summary, reward: scaleReward(WORLD_CUP.GROUP_ADVANCE_REWARD, state.tierLevel || 1), finished: false };
   },
 
   overview(state, status) {
+    const userIdKey = state.userTeamId || 'KOR';
+    const uName = state.teams?.[userIdKey]?.name || '대한민국';
+    const uGroup = state.userGroup || 'A';
     const tierBadge = (state.tierLevel || 1) > 1 ? ` [난이도 Lv.${state.tierLevel}]` : '';
     if (status === 'FINISHED') {
-      return state.champion === 'USER'
-        ? `🏆 2026 월드컵 우승!${tierBadge}`
-        : `${state.eliminatedAt}에서 탈락${tierBadge}`;
+      return state.champion === userIdKey
+        ? `🏆 2026 월드컵 우승 (${uName})${tierBadge}`
+        : `${state.eliminatedAt}에서 탈락 (${uName})${tierBadge}`;
     }
     return state.phase === 'GROUP'
-      ? `48개국 조별리그 ${state.matchday}/3차전${tierBadge}`
-      : `${state.rounds[state.roundIndex].name} 진행 중${tierBadge}`;
+      ? `48개국 ${uGroup}조 (${uName}) · ${state.matchday}/3차전${tierBadge}`
+      : `${state.rounds[state.roundIndex].name} 진행 중 (${uName})${tierBadge}`;
   },
 };
 
-function objectiveMet(objective, home, away) {
-  switch (objective.type) {
-    case 'NOT_LOSE':
-      return home >= away;
-    case 'WIN':
-      return home > away;
-    case 'WIN_MARGIN':
-      return home - away >= objective.margin;
-    case 'CLEAN_SHEET':
-      return away === 0 && home >= away;
-    default:
-      return false;
-  }
-}
+/* ------------------------------------------------------------------ */
+/* 4. 챌린지 타워 & 랭크 매치 핸들러                                    */
+/* ------------------------------------------------------------------ */
 
 const towerHandler = {
   create() {
     return { cleared: [], attempts: 0 };
   },
+
   next(userId, state, stageId) {
-    const stage = TOWER_STAGES.find((s) => s.id === Number(stageId));
+    const targetId = stageId || Math.min(TOWER_STAGES.length, state.cleared.length + 1);
+    const stage = TOWER_STAGES.find((s) => s.id === Number(targetId));
     if (!stage) throw new ValidationError('존재하지 않는 스테이지입니다.');
     if (stage.id > state.cleared.length + 1) throw new ValidationError('이전 스테이지를 먼저 클리어해야 합니다.');
     return {
       ref: `T:${stage.id}`,
       stageId: stage.id,
       label: `챌린지 타워 Stage ${stage.id} · ${stage.title}`,
-      opponentSpec: { seed: `tower:${stage.id}`, name: stage.opponent.name, strength: stage.opponent.strength, tactics: stage.opponent.tactics },
+      opponentSpec: {
+        seed: `tower:${userId}:${stage.id}`,
+        name: stage.opponent.name,
+        strength: stage.opponent.strength,
+        tactics: stage.opponent.tactics,
+      },
       scenario: {
         stageId: stage.id,
         title: stage.title,
@@ -964,113 +948,99 @@ const towerHandler = {
       },
     };
   },
-  apply({ state, stageId, userGoals, oppGoals }) {
-    const stage = TOWER_STAGES.find((s) => s.id === Number(stageId));
-    const met = objectiveMet(stage.objective, userGoals, oppGoals);
-    const firstClear = met && !state.cleared.includes(stage.id);
-    if (firstClear) state.cleared.push(stage.id);
+
+  apply({ state, userGoals, oppGoals, context }) {
+    const stage = TOWER_STAGES.find((s) => s.id === Number(context.stageId));
     state.attempts += 1;
-    const reward = !met ? { gold: 0, cashFree: 0 } : firstClear ? stage.reward : TOWER_REPEAT_REWARD;
-    return {
-      state,
-      summary: {
-        type: 'TOWER',
-        stageId: stage.id,
-        title: stage.title,
-        objective: stage.objective,
-        cleared: met,
-        firstClear,
-        clearedCount: state.cleared.length,
-        totalStages: TOWER_STAGES.length,
-      },
-      reward,
-      finished: false,
+    let cleared = false;
+    const obj = stage.objective;
+    if (obj.type === 'WIN') cleared = userGoals > oppGoals;
+    else if (obj.type === 'NOT_LOSE') cleared = userGoals >= oppGoals;
+    else if (obj.type === 'WIN_MARGIN') cleared = userGoals - oppGoals >= obj.margin;
+    else if (obj.type === 'CLEAN_SHEET') cleared = oppGoals === stage.scoreAway && userGoals >= oppGoals;
+
+    const firstClear = cleared && !state.cleared.includes(stage.id);
+    if (firstClear) state.cleared.push(stage.id);
+    const reward = !cleared ? { gold: 0, cashFree: 0 } : firstClear ? stage.reward : TOWER_REPEAT_REWARD;
+    const summary = {
+      type: 'TOWER',
+      stageId: stage.id,
+      totalStages: TOWER_STAGES.length,
+      title: stage.title,
+      objective: stage.objective.text,
+      cleared,
+      firstClear,
     };
+    return { state, summary, reward, finished: false };
   },
+
   overview(state) {
     return `${state.cleared.length}/${TOWER_STAGES.length} 스테이지 클리어`;
   },
 };
 
-function tierOf(rp) {
-  let index = 0;
-  RANK_TIERS.forEach((t, i) => {
-    if (rp >= t.minRp) index = i;
-  });
-  return { tier: RANK_TIERS[index], index };
-}
-
-function checkEarlyTitleClinch(standings, currentRound, totalRounds) {
-  if (!Array.isArray(standings) || standings.length < 2) return { clinched: false, winnerId: null };
-  const remainingMatches = Math.max(0, totalRounds - currentRound);
-  const maxPossibleGain = remainingMatches * 3;
-  const first = standings[0];
-  const second = standings[1];
-  // 2위 팀이 남은 경기를 전승하고 1위 팀이 전패해도 승점 역전이 불가능한 경우 조기 우승 확정
-  if (first.pts - second.pts > maxPossibleGain) {
-    return { clinched: true, winnerId: first.id, winnerName: first.name, remainingMatches };
-  }
-  return { clinched: false, winnerId: null };
+function tierForRp(rp) {
+  return RANK_TIERS.reduce((acc, t) => (rp >= t.minRp ? t : acc), RANK_TIERS[0]);
 }
 
 const rankedHandler = {
   create() {
-    return { rp: RANKED.START_RP, wins: 0, draws: 0, losses: 0, matches: 0, streak: 0, history: [] };
+    return { rp: RANKED.START_RP, wins: 0, draws: 0, losses: 0, streak: 0, history: [] };
   },
+
   next(userId, state) {
-    const rng = createRng(`ranked:${userId}:${state.matches}`);
-    const { index } = tierOf(state.rp);
-    const oppIndex = clamp(index + rng.pick([-1, 0, 0, 1]), 0, RANK_TIERS.length - 1);
-    const tier = RANK_TIERS[oppIndex];
-    const name = `${rng.pick(AI_CLUB_NAMES.RANKED)} [${tier.label}]`;
+    const rng = createRng(`rk:${userId}:${state.wins + state.draws + state.losses}`);
+    const tier = tierForRp(state.rp);
+    const oppName = rng.pick(AI_CLUB_NAMES.RANKED);
+    const oppStrength = tier.strength + rng.int(-2, 3);
     return {
-      ref: `R:${state.matches}`,
-      label: `랭크 매치 #${state.matches + 1} (${tier.label} 상대)`,
-      opponentSpec: { seed: `ranked:${userId}:${state.matches}`, name, strength: tier.strength + rng.int(-2, 2) },
-      oppTierIndex: oppIndex,
+      ref: `R:${state.wins + state.draws + state.losses + 1}`,
+      label: `랭크 매치 · ${tier.label} (${state.rp} RP)`,
+      opponentSpec: { seed: `ranked:${userId}:${Date.now()}`, name: oppName, strength: oppStrength },
     };
   },
-  apply({ userId, state, userGoals, oppGoals }) {
-    const info = rankedHandler.next(userId, state);
-    const before = tierOf(state.rp);
-    let delta;
+
+  apply({ state, userGoals, oppGoals, context }) {
+    const before = state.rp;
+    const tierBefore = tierForRp(before);
+    let delta = 0;
+    let reward = { gold: 0, cashFree: 0 };
     if (userGoals > oppGoals) {
-      delta = RANKED.WIN_RP + (info.oppTierIndex > before.index ? RANKED.HIGHER_TIER_BONUS : 0);
       state.wins += 1;
-      state.streak = Math.max(0, state.streak) + 1;
+      state.streak += 1;
+      delta = RANKED.WIN_RP + (state.streak >= 3 ? RANKED.HIGHER_TIER_BONUS : 0);
+      reward = RANKED.WIN_REWARD;
     } else if (userGoals === oppGoals) {
-      delta = RANKED.DRAW_RP;
       state.draws += 1;
       state.streak = 0;
+      delta = RANKED.DRAW_RP;
     } else {
-      delta = RANKED.LOSE_RP;
       state.losses += 1;
-      state.streak = Math.min(0, state.streak) - 1;
+      state.streak = 0;
+      delta = RANKED.LOSE_RP;
     }
-    const rpBefore = state.rp;
     state.rp = Math.max(0, state.rp + delta);
-    state.matches += 1;
-    state.history = [{ opponent: info.opponentSpec.name, score: `${userGoals}:${oppGoals}`, delta }, ...state.history].slice(0, 10);
-    const after = tierOf(state.rp);
-    return {
-      state,
-      summary: {
-        type: 'RANKED',
-        rpBefore,
-        rpAfter: state.rp,
-        delta,
-        tierBefore: before.tier.label,
-        tierAfter: after.tier.label,
-        tierChanged: after.index !== before.index,
-        streak: state.streak,
-      },
-      reward: userGoals > oppGoals ? RANKED.WIN_REWARD : { gold: 0, cashFree: 0 },
-      finished: false,
+    const tierAfter = tierForRp(state.rp);
+    state.history = [
+      { opponent: context.opponentName, score: `${userGoals}:${oppGoals}`, delta, rp: state.rp },
+      ...state.history.slice(0, 9),
+    ];
+    const summary = {
+      type: 'RANKED',
+      rpBefore: before,
+      rp: state.rp,
+      delta,
+      tierBefore: tierBefore.label,
+      tier: tierAfter.label,
+      promoted: tierAfter.minRp > tierBefore.minRp,
+      streak: state.streak,
     };
+    return { state, summary, reward, finished: false };
   },
+
   overview(state) {
-    const { tier } = tierOf(state.rp);
-    return `${tier.label} · ${state.rp} RP · ${state.wins}승 ${state.draws}무 ${state.losses}패`;
+    const tier = tierForRp(state.rp);
+    return `${tier.label} · ${state.rp} RP (${state.wins}승 ${state.draws}무 ${state.losses}패)`;
   },
 };
 
@@ -1083,33 +1053,31 @@ const HANDLERS = {
 };
 
 function handlerFor(mode) {
-  if (!MODES.includes(mode)) throw new ValidationError('지원하지 않는 게임 모드입니다.');
+  if (!MODES.includes(mode)) throw new ValidationError('지원하지 않는 대회 모드입니다.');
   return HANDLERS[mode];
-}
-
-async function userTeamStrength(conn, userId) {
-  const players = await ClubRepository.getFullPlayers(conn, userId);
-  const starters = players.filter((p) => p.isStarter).slice(0, 11);
-  const pool_ = starters.length ? starters : players.slice(0, 11);
-  if (pool_.length === 0) return 60;
-  return pool_.reduce((sum, p) => sum + computeOverall(p.baseStats, p.level, p.mainPosition), 0) / pool_.length;
 }
 
 export default class CompetitionService {
   static async getOverview(userId) {
+    return await CompetitionService.listAll(userId);
+  }
+
+  static async listAll(userId) {
     const rows = await ClubRepository.getAllCompetitions(null, userId);
+    const byMode = new Map(rows.map((r) => [r.mode, r]));
     return MODES.map((mode) => {
-      const row = rows.find((r) => r.mode === mode);
+      const row = byMode.get(mode);
+      if (!row) return { mode, label: MODE_LABELS[mode], status: 'NONE', summary: '아직 시작하지 않았습니다.' };
       return {
         mode,
         label: MODE_LABELS[mode],
-        status: row ? row.status : 'NONE',
-        summary: row ? HANDLERS[mode].overview(row.state, row.status) : '아직 시작하지 않았습니다.',
+        status: row.status,
+        summary: handlerFor(mode).overview(row.state, row.status),
       };
     });
   }
 
-static async getState(userId, mode) {
+  static async getState(userId, mode) {
     const handler = handlerFor(mode);
     const row = await ClubRepository.getCompetition(null, userId, mode);
     if (!row || !row.state) {
@@ -1126,7 +1094,6 @@ static async getState(userId, mode) {
       view.standings = rankRows(Object.values(row.state.table));
     }
     if (mode === 'WORLD_CUP') {
-      // 구버전(4개 조) 세이브 데이터와 신버전(12개 조) 모두 에러 없이 호환되도록 존재하는 그룹 키만 매핑함
       const rawGroups = row.state.groups || {};
       const validGroupKeys = Object.keys(rawGroups).filter((g) => Array.isArray(rawGroups[g]));
       view.groupStandings = Object.fromEntries(
@@ -1145,75 +1112,145 @@ static async getState(userId, mode) {
     return view;
   }
 
-  static async start(userId, mode, restart = false) {
+  /**
+   * 대회 시작 및 월드컵 참가 국가 변경 처리
+   * - restart 인자가 boolean이든 { restart, nationCode } 객체든 모두 호환 처리함
+   */
+  static async start(userId, mode, optionsOrRestart = false) {
+    let restart = false;
+    let nationCode = null;
+
+    if (typeof optionsOrRestart === 'boolean') {
+      restart = optionsOrRestart;
+    } else if (typeof optionsOrRestart === 'string') {
+      if (optionsOrRestart.startsWith('NATION:')) {
+        nationCode = optionsOrRestart.split(':')[1] || 'KOR';
+        restart = false;
+      } else if (optionsOrRestart.startsWith('RESTART:')) {
+        nationCode = optionsOrRestart.split(':')[1] || 'KOR';
+        restart = true;
+      } else {
+        restart = Boolean(optionsOrRestart);
+      }
+    } else if (optionsOrRestart && typeof optionsOrRestart === 'object') {
+      if (typeof optionsOrRestart.restart === 'string' && optionsOrRestart.restart.startsWith('NATION:')) {
+        nationCode = optionsOrRestart.restart.split(':')[1] || 'KOR';
+        restart = false;
+      } else if (typeof optionsOrRestart.restart === 'string' && optionsOrRestart.restart.startsWith('RESTART:')) {
+        nationCode = optionsOrRestart.restart.split(':')[1] || 'KOR';
+        restart = true;
+      } else {
+        restart = Boolean(optionsOrRestart.restart);
+        nationCode = optionsOrRestart.nationCode || null;
+      }
+    }
+
     const handler = handlerFor(mode);
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const existing = await ClubRepository.getCompetition(conn, userId, mode, true);
-      const persistent = mode === 'CHALLENGE_TOWER' || mode === 'RANKED';
-      if (existing && persistent) {
-        await conn.commit();
-        return CompetitionService.getState(userId, mode);
-      }
-      if (existing && existing.status === 'ACTIVE' && !restart) {
-        throw new ConflictError('진행 중인 대회가 있습니다. 새로 시작하려면 기존 진행을 포기해야 합니다.');
-      }
       const club = await ClubRepository.findClub(conn, userId);
-      // 리그뿐만 아니라 챔피언스컵, 월드컵도 이전 상태(prev)를 전달하여 우승 후 재시작 시 난이도,보상 단계가 상승하도록 연결
-      const prev = existing ? existing.state : null;
-      const state = handler.create({ userId, club, prev });
+      if (!club) throw new NotFoundError('구단 정보를 찾을 수 없습니다.');
+      const existing = await ClubRepository.getCompetition(conn, userId, mode, true);
+
+      // 월드컵 모드에서 1차전 시작 전에 편성된 조를 유지한 채 국가만 변경하는 경우
+      if (
+        mode === 'WORLD_CUP' &&
+        existing &&
+        existing.status === 'ACTIVE' &&
+        !restart &&
+        nationCode &&
+        existing.state?.teams?.[nationCode] &&
+        existing.state?.matchday === 1 &&
+        existing.state?.phase === 'GROUP'
+      ) {
+        const nextState = { ...existing.state };
+        nextState.userTeamId = nationCode;
+        nextState.userGroup =
+          WORLD_CUP.GROUPS.find((g) => nextState.groups?.[g]?.includes(nationCode)) || 'A';
+        await ClubRepository.saveCompetition(conn, userId, mode, 'ACTIVE', nextState);
+        await conn.commit();
+        return await CompetitionService.getState(userId, mode);
+      }
+
+      const isLegacyWorldCup = mode === 'WORLD_CUP' && existing && !existing.state?.userTeamId;
+
+      if (existing && existing.status === 'ACTIVE' && !restart && !isLegacyWorldCup && mode !== 'CHALLENGE_TOWER' && mode !== 'RANKED') {
+        await conn.commit();
+        return await CompetitionService.getState(userId, mode);
+      }
+
+      const prev = existing?.state || null;
+      const state = handler.create({ userId, club, prev, selectedNationCode: nationCode || 'KOR' });
       await ClubRepository.saveCompetition(conn, userId, mode, 'ACTIVE', state);
       await conn.commit();
+      return await CompetitionService.getState(userId, mode);
     } catch (err) {
       await conn.rollback().catch(() => {});
       throw err;
     } finally {
       conn.release();
     }
-    return CompetitionService.getState(userId, mode);
   }
 
-  static async getNextMatch(userId, mode, stageId = null) {
+  static async nextMatch(userId, mode, stageId = null, nationCode = null) {
     const handler = handlerFor(mode);
-    const row = await ClubRepository.getCompetition(null, userId, mode);
-    if (!row || row.status !== 'ACTIVE') throw new NotFoundError('진행 중인 대회가 없습니다. 먼저 대회를 시작하세요.');
-    const info = handler.next(userId, row.state, stageId);
-    const spec = info.opponentSpec;
-    const strength = spec.strength ?? (await userTeamStrength(null, userId));
-    const rawOpponent = buildOpponent({ ...spec, strength });
-    const currentRound = row.state?.round || row.state?.matchday || 1;
-    const readyOpponent = simulateOpponentFatigueAndRotation(rawOpponent, currentRound);
+    let row = await ClubRepository.getCompetition(null, userId, mode);
+    if (!row || row.status !== 'ACTIVE' || (mode === 'WORLD_CUP' && !row.state?.userTeamId)) {
+      await CompetitionService.start(userId, mode, { restart: true, nationCode });
+      row = await ClubRepository.getCompetition(null, userId, mode);
+    }
+
+    const spec = handler.next(userId, row.state, stageId);
+    const opponent = buildOpponent(spec.opponentSpec);
+    const scenario = spec.scenario || null;
     return {
       mode,
-      ref: info.ref,
-      label: info.label,
-      stageId: info.stageId ?? null,
-      opponent: readyOpponent,
-      scenario: info.scenario || null,
+      stageId: spec.stageId ?? null,
+      ref: spec.ref,
+      label: spec.label,
+      opponent,
+      scenario,
+      userTeamId: row.state.userTeamId || 'USER',
+      userGroup: row.state.userGroup || null,
+      next: {
+        ref: spec.ref,
+        stageId: spec.stageId ?? null,
+        label: spec.label,
+        opponent,
+        scenario,
+      },
+      baseline: scenario ? { home: scenario.scoreHome, away: scenario.scoreAway } : { home: 0, away: 0 },
     };
   }
 
-  static async applyResult(conn, userId, context, userGoals, oppGoals) {
-    const handler = handlerFor(context.mode);
-    const row = await ClubRepository.getCompetition(conn, userId, context.mode, true);
-    if (!row || row.status !== 'ACTIVE') throw new ValidationError('진행 중인 대회가 아닙니다.');
-    const info = handler.next(userId, row.state, context.stageId);
-    if (info.ref !== context.ref) throw new ValidationError('대회 일정이 변경되어 결과를 반영할 수 없습니다.');
+  static async getNextMatch(userId, mode, stageId = null, nationCode = null) {
+    return await CompetitionService.nextMatch(userId, mode, stageId, nationCode);
+  }
 
-    const userStrength = await userTeamStrength(conn, userId);
-    const { state, summary, reward, finished } = handler.apply({
+  static async applyResult(conn, userId, context, scoreHome, scoreAway) {
+    const { mode } = context;
+    const handler = handlerFor(mode);
+    const row = await ClubRepository.getCompetition(conn, userId, mode, true);
+    if (!row) throw new NotFoundError('진행 중인 대회를 찾을 수 없습니다.');
+
+    const allPlayers = await ClubRepository.getFullPlayers(conn, userId);
+    const starters = allPlayers.filter((p) => p.isStarter);
+    const userStrength =
+      starters.length > 0
+        ? Math.round(starters.reduce((s, p) => s + computeOverall(p.baseStats, p.level, p.mainPosition), 0) / starters.length)
+        : 78;
+
+    const result = handler.apply({
       userId,
       state: row.state,
-      stageId: context.stageId,
-      userGoals,
-      oppGoals,
+      userGoals: scoreHome,
+      oppGoals: scoreAway,
       userStrength,
+      context,
     });
-    await ClubRepository.saveCompetition(conn, userId, context.mode, finished ? 'FINISHED' : 'ACTIVE', state);
-    summary.mode = context.mode;
-    summary.label = MODE_LABELS[context.mode];
-    summary.finished = finished;
-    return { summary, reward: { gold: reward.gold || 0, cashFree: reward.cashFree || 0 } };
+    const nextStatus = result.finished ? 'FINISHED' : 'ACTIVE';
+    await ClubRepository.saveCompetition(conn, userId, mode, nextStatus, result.state);
+    return result;
   }
 }

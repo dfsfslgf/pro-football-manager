@@ -55,16 +55,16 @@ export const GAME_RULES = Object.freeze({
     RW: 0.75,
     LAM: 0.75,
     RAM: 0.75,
-    LB: 0.70,   
-    RB: 0.70,  
-    LWB: 0.76,  
-    RWB: 0.76,  
-    LM: 0.76,  
-    RM: 0.76,  
+    LB: 0.70,
+    RB: 0.70,
+    LWB: 0.76,
+    RWB: 0.76,
+    LM: 0.76,
+    RM: 0.76,
   }),
 
   POSITION_FAMILIARITY_MULTIPLIER: Object.freeze({ NATURAL: 1.0, ADEQUATE: 0.9, UNFAMILIAR: 0.75, SEVERE: 0.4 }),
-  
+
   TEAM_TACTIC_OPTIONS: Object.freeze({
     mentality: Object.freeze(['PARK_THE_BUS', 'DEFENSIVE', 'BALANCED', 'ATTACKING', 'ALL_OUT_ATTACK']),
     passingStyle: Object.freeze(['SHORT', 'MIXED', 'DIRECT_LONG']),
@@ -82,11 +82,10 @@ export const GAME_RULES = Object.freeze({
     pressing: Object.freeze({ LOW: 0.8, MEDIUM: 1.0, HIGH: 1.2 }),
   }),
 
-
   INSTRUCTION_STAMINA_MULTIPLIER: Object.freeze({
     BALANCED: 1.0,
     STAY_BACK: 0.75,
-    OVERLAP: 1.06, 
+    OVERLAP: 1.06,
     HOLD_POSITION: 0.8,
     STEP_UP: 1.05,
     BOX_TO_BOX: 0.95,
@@ -100,4 +99,12 @@ export const GAME_RULES = Object.freeze({
   }),
 
   LOCKER_TALK_OPTIONS: Object.freeze(['PASSIONATE', 'STERN', 'CALM']),
+});
+
+/**
+ * OpponentFactory 및 매치 엔진 호환용 MATCH 상수
+ */
+export const MATCH = Object.freeze({
+  STAT_KEYS: Object.freeze(['speed', 'shooting', 'passing', 'dribbling', 'defense', 'physical', 'gkReflexes']),
+  ...GAME_RULES,
 });
