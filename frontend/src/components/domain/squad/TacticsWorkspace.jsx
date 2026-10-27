@@ -134,7 +134,6 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
     ? ` (${player.preferredRoleCode})`
     : '';
 
-  // 경기 중에는 캔버스와 동일한 liveRating 값을 우선 참조하여 평점 일치 보장
   const liveRatingValue = Number(player.liveRating ?? player.rating ?? getRating(player) ?? 6.0).toFixed(1);
 
   if (player.isSentOff) {
@@ -171,7 +170,7 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
           {player.name}
           {(player.suspendedMatches || 0) > 0 && (
             <span className="ml-1.5 rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">
-              🟥 징계 {player.suspendedMatches}경기
+              🟥 징계 {player.suspendedMatches}경기 (교체 필요)
             </span>
           )}
         </span>
@@ -255,7 +254,6 @@ function SubstitutionTab({ model }) {
 
   const selectedFieldSlot = selectedTarget?.kind === 'field' ? model.starters[selectedTarget.slotIndex] : null;
 
-  // 벤치 및 예비 선수를 능력치 역순이 아닌 포지션별(GK -> DF -> MF -> FW)로 정렬함
   const filteredBench = useMemo(
     () =>
       sortPlayersByPosition(
@@ -284,6 +282,30 @@ function SubstitutionTab({ model }) {
       setSelectedTarget(null);
       return;
     }
+
+    // 퇴장 징계 중인 선수를 선발 슬롯으로 투입하려 할 때 차단
+    if (current.kind === 'field' && target.kind !== 'field') {
+      const incoming = [...model.bench, ...model.reserve].find((p) => p.id === target.id);
+      if (incoming && (incoming.suspendedMatches || 0) > 0) {
+        setFeedback({
+          success: false,
+          message: `${incoming.name} 선수는 퇴장 징계로 인해 잔여 ${incoming.suspendedMatches}경기 동안 선발 출전할 수 없습니다.`,
+        });
+        setSelectedTarget(null);
+        return;
+      }
+    } else if (target.kind === 'field' && current.kind !== 'field') {
+      const incoming = [...model.bench, ...model.reserve].find((p) => p.id === current.id);
+      if (incoming && (incoming.suspendedMatches || 0) > 0) {
+        setFeedback({
+          success: false,
+          message: `${incoming.name} 선수는 퇴장 징계로 인해 잔여 ${incoming.suspendedMatches}경기 동안 선발 출전할 수 없습니다.`,
+        });
+        setSelectedTarget(null);
+        return;
+      }
+    }
+
     if (current.kind === 'field' && target.kind === 'field') {
       setFeedback(model.swap(current.slotIndex, target.slotIndex));
     } else if (current.kind === 'field') {
