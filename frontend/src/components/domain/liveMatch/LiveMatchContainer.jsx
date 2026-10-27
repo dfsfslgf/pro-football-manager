@@ -1,17 +1,79 @@
 import { useEffect, useState } from 'react';
-import { Loader2, BarChart3, MessageSquare } from 'lucide-react';
+import { Loader2, BarChart3, Megaphone, MessageSquare } from 'lucide-react';
 import useLiveMatchStore from '../../../store/useLiveMatchStore.js';
 import useNavStore from '../../../store/useNavStore.js';
 import useClubStore from '../../../store/useClubStore.js';
 import useSquadStore from '../../../store/useSquadStore.js';
 import useCompetitionStore from '../../../store/useCompetitionStore.js';
+import { TOUCHLINE_SHOUTS } from '../../../constants/tacticsConfig.js';
 import Badge from '../../common/Badge.jsx';
+import Notice from '../../common/Notice.jsx';
 import PitchCanvas2D from './PitchCanvas2D.jsx';
 import LiveControlBar from './LiveControlBar.jsx';
 import InGameTacticalPanel from './InGameTacticalPanel.jsx';
 import HalfTimeModal from './HalfTimeModal.jsx';
 import ScoreHeader from './ScoreHeader.jsx';
 import FullTimeReportModal from './FullTimeReportModal.jsx';
+
+/**
+ * 경기장 캔버스 바로 아래에 상시 노출되는 실시간 터치라인 감독 지시 바
+ */
+function TouchlineShoutBar() {
+  const status = useLiveMatchStore((s) => s.status);
+  const minute = useLiveMatchStore((s) => s.minute);
+  const lastShoutMin = useLiveMatchStore((s) => s.lastTouchlineShoutMinute ?? -10);
+  const activeShout = useLiveMatchStore((s) => s.homeTeam?.touchlineShout);
+  const issueTouchlineShout = useLiveMatchStore((s) => s.issueTouchlineShout);
+  const [notice, setNotice] = useState(null);
+
+  useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const cooldownRemain = Math.max(0, 5 - (minute - lastShoutMin));
+
+  const handleShout = (key) => {
+    const res = issueTouchlineShout(key);
+    setNotice({ type: res.success ? 'success' : 'error', text: res.message });
+  };
+
+  return (
+    <div className="rounded-2xl border border-amber-500/30 bg-slate-900/80 p-3 shadow-lg">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+          <Megaphone className="h-4 w-4" /> 실시간 터치라인 감독 지시 (경기장 즉시 반영)
+        </span>
+        <span className="text-[11px] font-semibold text-slate-400">
+          {cooldownRemain > 0 ? `다음 지시 가능까지 ${cooldownRemain}분` : '⚡ 즉시 지시 가능'}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        {Object.values(TOUCHLINE_SHOUTS).map((sh) => {
+          const isSelected = activeShout === sh.key;
+          return (
+            <button
+              key={sh.key}
+              type="button"
+              disabled={status !== 'live' || cooldownRemain > 0}
+              onClick={() => handleShout(sh.key)}
+              className={`rounded-xl border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                isSelected
+                  ? 'border-amber-400 bg-amber-500/20 text-white ring-1 ring-amber-400'
+                  : 'border-slate-700 bg-slate-950/70 text-slate-200 hover:border-amber-400/60 hover:bg-slate-800'
+              }`}
+            >
+              <p className="text-xs font-black text-amber-300">{sh.label}</p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-400">{sh.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+      <Notice notice={notice} className="mt-2" />
+    </div>
+  );
+}
 
 function LiveStatsBoard() {
   const homeTeam = useLiveMatchStore((s) => s.homeTeam);
@@ -27,18 +89,35 @@ function LiveStatsBoard() {
     { label: '점유율 (%)', h: `${homePoss}%`, a: `${awayPoss}%`, hVal: homePoss, aVal: awayPoss },
     { label: '슈팅', h: homeTeam.stats?.shots || 0, a: awayTeam.stats?.shots || 0 },
     { label: '유효 슈팅', h: homeTeam.stats?.shotsOnTarget || 0, a: awayTeam.stats?.shotsOnTarget || 0 },
-    { label: '패스 성공률', h: `${homeTeam.stats?.passAccuracy ?? 85}%`, a: `${awayTeam.stats?.passAccuracy ?? 85}%`, hVal: homeTeam.stats?.passAccuracy ?? 85, aVal: awayTeam.stats?.passAccuracy ?? 85 },
+    {
+      label: '패스 성공률',
+      h: `${homeTeam.stats?.passAccuracy ?? 85}%`,
+      a: `${awayTeam.stats?.passAccuracy ?? 85}%`,
+      hVal: homeTeam.stats?.passAccuracy ?? 85,
+      aVal: awayTeam.stats?.passAccuracy ?? 85,
+    },
     { label: '태클 / 볼 탈취', h: homeTeam.stats?.tackles || 0, a: awayTeam.stats?.tackles || 0 },
     { label: '골키퍼 선방', h: homeTeam.stats?.saves || 0, a: awayTeam.stats?.saves || 0 },
     { label: '코너킥', h: homeTeam.stats?.corners || 0, a: awayTeam.stats?.corners || 0 },
-    { label: '반칙 (옐로카드)', h: `${homeTeam.stats?.fouls || 0} (${homeTeam.stats?.yellowCards || 0})`, a: `${awayTeam.stats?.fouls || 0} (${awayTeam.stats?.yellowCards || 0})`, hVal: homeTeam.stats?.fouls || 0, aVal: awayTeam.stats?.fouls || 0 },
+    { label: '오프사이드', h: homeTeam.stats?.offsides || 0, a: awayTeam.stats?.offsides || 0 },
+    {
+      label: '반칙 (옐로/레드)',
+      h: `${homeTeam.stats?.fouls || 0} (${homeTeam.stats?.yellowCards || 0}/${homeTeam.stats?.redCards || 0})`,
+      a: `${awayTeam.stats?.fouls || 0} (${awayTeam.stats?.yellowCards || 0}/${awayTeam.stats?.redCards || 0})`,
+      hVal: homeTeam.stats?.fouls || 0,
+      aVal: awayTeam.stats?.fouls || 0,
+    },
   ];
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between rounded-lg bg-slate-800/80 px-3 py-2 text-xs text-slate-300">
-        <span>날씨: <b className="text-white">{weather?.label || '☀️ 맑음'}</b></span>
-        <span>팀 OVR: <b className="text-blue-300">{homeTeam.avgOvr}</b> vs <b className="text-rose-300">{awayTeam.avgOvr}</b></span>
+        <span>
+          날씨: <b className="text-white">{weather?.label || '맑음'}</b>
+        </span>
+        <span>
+          팀 OVR: <b className="text-blue-300">{homeTeam.avgOvr}</b> vs <b className="text-rose-300">{awayTeam.avgOvr}</b>
+        </span>
       </div>
       <div className="space-y-2.5">
         {rows.map((r) => {
@@ -173,7 +252,7 @@ export default function LiveMatchContainer() {
     await Promise.all([
       useClubStore.getState().refreshOverview(),
       useClubStore.getState().refreshPlayers(),
-      useSquadStore.getState().loadSquad(),
+      useSquadStore.getState().loadSquad(true),
       useCompetitionStore.getState().loadList(),
     ]);
   };
@@ -215,6 +294,7 @@ export default function LiveMatchContainer() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <PitchCanvas2D />
+          <TouchlineShoutBar />
           {isPanelOpen && status === 'live' && <InGameTacticalPanel mode="live" onClose={handleClosePanel} />}
         </div>
         <SideMatchFeed />
@@ -222,13 +302,18 @@ export default function LiveMatchContainer() {
       <HalfTimeModal />
       {status === 'finished' && !isLeaving && (
         <FullTimeReportModal
+          open={status === 'finished'}
           finishState={finishState}
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
           homeName={homeTeam.name}
           awayName={awayTeam.name}
           homeStats={homeTeam.stats}
           awayStats={awayTeam.stats}
           score={{ home: homeTeam.score, away: awayTeam.score }}
+          onRetrySave={() => useLiveMatchStore.getState().submitResult()}
           onRetry={() => useLiveMatchStore.getState().submitResult()}
+          onConfirmExit={handleContinue}
           onContinue={handleContinue}
           onQuickNext={plan.available ? handleQuickNext : null}
           quickNextLabel={plan.label}

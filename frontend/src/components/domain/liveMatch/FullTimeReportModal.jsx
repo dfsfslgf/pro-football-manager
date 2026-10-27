@@ -1,390 +1,260 @@
-import { Loader2, RefreshCw, Trophy, BarChart3 } from 'lucide-react';
-import { OUTCOME_META, formatNumber } from '../../../constants/gameConfig.js';
-import ProgressBar from '../../common/ProgressBar.jsx';
+import { Award, CheckCircle2, Coins, Crown, Flame, Loader2, Sparkles, Trophy } from 'lucide-react';
+import { formatNumber } from '../../../constants/gameConfig.js';
 
-function RatingBar({ rating }) {
-  const pct = Math.max(0, Math.min(100, ((rating - 3) / 7) * 100));
-  const color = rating >= 8 ? 'bg-yellow-400' : rating >= 7 ? 'bg-emerald-500' : rating >= 6 ? 'bg-sky-500' : 'bg-rose-500';
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-700">
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-8 text-right text-xs font-black text-white">{rating.toFixed(1)}</span>
-    </div>
-  );
-}
-
-function MomCard({ mom }) {
-  if (!mom) return null;
-  return (
-    <div
-      className="rounded-xl border-2 border-yellow-400/80 bg-gradient-to-br from-yellow-500/25 via-amber-900/20 to-slate-900 p-4 shadow-lg shadow-yellow-500/20"
-      data-testid="mom-card"
-    >
-      <p className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.25em] text-yellow-300">
-        <Trophy className="h-3.5 w-3.5" /> Man of the Match
-      </p>
-      <p className="mt-2 text-2xl font-black text-white">{mom.name}</p>
-      <p className="text-xs text-yellow-100/80">
-        {mom.position} · {mom.minutes}분 출전 · 득점 {mom.goals} · 도움 {mom.assists}
-        {mom.saves > 0 ? ` · 선방 ${mom.saves}` : ''}
-      </p>
-      <p className="mt-2 text-4xl font-black text-yellow-300">{mom.rating.toFixed(1)}</p>
-    </div>
-  );
-}
-
-/**
- * 1위 우승(🏆), 1~4위 챔피언스리그(🟦 UCL), 5~6위 유로파리그(🟧 UEL),
- * 그리고 독일 분데스리가(18팀)는 하위 2팀(17~18위), 타 리그는 하위 3팀 강등(🔻 REL) 표시
- */
-export function StandingsTable({ rows, limit = 24, isBundesliga = false, division = 1 }) {
-  const totalTeams = rows.length;
-  const relegateCount = isBundesliga || totalTeams === 18 || totalTeams <= 14 ? 2 : 3;
-  const relegateStartRank = Math.max(totalTeams - relegateCount + 1, 9);
-
-  const getZoneBadge = (rank) => {
-    if (division > 1) {
-      if (rank <= 2) return <span className="ml-1 rounded bg-emerald-500/20 px-1 py-0.5 text-[9px] font-bold text-emerald-300">🔺승격</span>;
-      return null;
-    }
-    if (rank === 1) return <span className="ml-1 rounded bg-amber-500/30 px-1 py-0.5 text-[9px] font-bold text-amber-300">🏆우승·UCL</span>;
-    if (rank <= 4) return <span className="ml-1 rounded bg-blue-500/25 px-1 py-0.5 text-[9px] font-bold text-blue-300">🟦챔스(UCL)</span>;
-    if (rank <= 6) return <span className="ml-1 rounded bg-orange-500/25 px-1 py-0.5 text-[9px] font-bold text-orange-300">🟧유로파(UEL)</span>;
-    if (rank >= relegateStartRank) return <span className="ml-1 rounded bg-rose-500/25 px-1 py-0.5 text-[9px] font-bold text-rose-300">🔻강등권</span>;
-    return null;
-  };
+export function StandingsTable({ rows = [], limit = null, isBundesliga = false, division = 1 }) {
+  const list = limit ? rows.slice(0, limit) : rows;
+  const total = rows.length;
+  const relegateCount = isBundesliga || total <= 18 ? 2 : 3;
 
   return (
-    <div className="space-y-2">
-      {division === 1 && (
-        <div className="flex flex-wrap gap-2 text-[10px] text-slate-400">
-          <span>🏆 1위: 리그 우승</span>
-          <span className="text-blue-300">🟦 1~4위: 챔피언스리그 진출</span>
-          <span className="text-orange-300">🟧 5~6위: 유로파리그 진출</span>
-          <span className="text-rose-300">🔻 하위 {relegateCount}팀({relegateStartRank}~{totalTeams}위): 2부 강등</span>
-        </div>
-      )}
+    <div className="overflow-x-auto">
       <table className="w-full text-xs">
-        <thead>
-          <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
-            <th className="py-1 pr-2">#</th>
-            <th>구단</th>
-            <th className="text-center">경기</th>
-            <th className="text-center">승</th>
-            <th className="text-center">무</th>
-            <th className="text-center">패</th>
-            <th className="text-center">득실</th>
-            <th className="text-right">승점</th>
+        <thead className="bg-slate-900/90 text-[10px] uppercase text-slate-400">
+          <tr>
+            <th className="p-2 text-center">순위</th>
+            <th className="p-2 text-left">구단</th>
+            <th className="p-2 text-center">경기</th>
+            <th className="p-2 text-center">승</th>
+            <th className="p-2 text-center">무</th>
+            <th className="p-2 text-center">패</th>
+            <th className="p-2 text-center">득실</th>
+            <th className="p-2 text-center">승점</th>
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, limit).map((r) => (
-            <tr
-              key={r.id}
-              className={`border-t border-slate-800/60 ${
-                r.id === 'USER' ? 'bg-blue-500/15 font-bold text-white' : 'text-slate-300'
-              }`}
-            >
-              <td className="py-1.5 pr-2 font-bold">{r.rank}</td>
-              <td className="truncate py-1.5">
-                {r.emblem} {r.name}
-                {getZoneBadge(r.rank)}
-              </td>
-              <td className="text-center">{r.p}</td>
-              <td className="text-center">{r.w}</td>
-              <td className="text-center">{r.d}</td>
-              <td className="text-center">{r.l}</td>
-              <td className="text-center">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
-              <td className="text-right font-black">{r.pts}</td>
-            </tr>
-          ))}
+          {list.map((r) => {
+            const isUser = r.id === 'USER';
+            const isPromote = division > 1 && r.rank <= 3;
+            const isRelegate = division === 1 && total >= 10 && r.rank > total - relegateCount;
+            return (
+              <tr
+                key={r.id}
+                className={`border-t border-slate-800/80 ${
+                  isUser ? 'bg-blue-500/15 font-bold text-white' : 'text-slate-300'
+                }`}
+              >
+                <td className="p-2 text-center font-black">
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+                      r.rank === 1
+                        ? 'bg-amber-400 text-slate-950'
+                        : isPromote
+                        ? 'bg-emerald-500/30 text-emerald-300'
+                        : isRelegate
+                        ? 'bg-rose-500/30 text-rose-300'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {r.rank}
+                  </span>
+                </td>
+                <td className="p-2 truncate">
+                  {r.emblem && <span className="mr-1.5">{r.emblem}</span>}
+                  {r.name}
+                  {r.rank === 1 && <span className="ml-1.5 text-[10px] text-amber-300">👑</span>}
+                </td>
+                <td className="p-2 text-center">{r.p}</td>
+                <td className="p-2 text-center text-emerald-300">{r.w}</td>
+                <td className="p-2 text-center text-slate-400">{r.d}</td>
+                <td className="p-2 text-center text-rose-300">{r.l}</td>
+                <td className="p-2 text-center">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
+                <td className="p-2 text-center font-black text-amber-300">{r.pts}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-/**
- * 경기 종료 후에도 양 팀의 전체 경기 통계(점유율, 슈팅, 유효슈팅, 패스성공률, 태클, 선방, 코너킥, 반칙)를 보여줌.
- */
-function FullTimeMatchStatsSection({ report, fallbackHomeStats, fallbackAwayStats }) {
-  const h = report?.homeStats || fallbackHomeStats || {};
-  const a = report?.awayStats || fallbackAwayStats || {};
-
+function StatCompareRow({ label, homeVal, awayVal, unit = '' }) {
+  const total = Math.max(1, Number(homeVal || 0) + Number(awayVal || 0));
+  const homePct = Math.round((Number(homeVal || 0) / total) * 100);
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4" data-testid="fulltime-stats-box">
-      <h3 className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-emerald-300">
-        <BarChart3 className="h-4 w-4" /> 최종 경기 통계 (Full-Time Match Statistics)
-      </h3>
-      <div className="grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2">
-        <ProgressBar label="볼 점유율" homeValue={h.possession ?? 50} awayValue={a.possession ?? 50} unit="%" />
-        <ProgressBar label="패스 성공률" homeValue={h.passAccuracy ?? 85} awayValue={a.passAccuracy ?? 84} unit="%" />
-        <ProgressBar label="총 슈팅" homeValue={h.shots ?? 0} awayValue={a.shots ?? 0} />
-        <ProgressBar label="유효 슈팅" homeValue={h.shotsOnTarget ?? 0} awayValue={a.shotsOnTarget ?? 0} />
-        <ProgressBar label="태클 / 볼 탈취" homeValue={h.tackles ?? 0} awayValue={a.tackles ?? 0} />
-        <ProgressBar label="골키퍼 선방" homeValue={h.saves ?? 0} awayValue={a.saves ?? 0} />
-        <ProgressBar label="코너킥" homeValue={h.corners ?? 0} awayValue={a.corners ?? 0} />
-        <ProgressBar label="반칙 (파울)" homeValue={h.fouls ?? 0} awayValue={a.fouls ?? 0} />
+    <div className="space-y-1 text-xs">
+      <div className="flex justify-between font-bold">
+        <span className="text-blue-300">
+          {homeVal}
+          {unit}
+        </span>
+        <span className="text-slate-400">{label}</span>
+        <span className="text-rose-300">
+          {awayVal}
+          {unit}
+        </span>
+      </div>
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-slate-800">
+        <div className="bg-blue-500" style={{ width: `${homePct}%` }} />
+        <div className="bg-rose-500" style={{ width: `${100 - homePct}%` }} />
       </div>
     </div>
   );
 }
 
-function CompetitionSummary({ competition }) {
-  if (!competition) return null;
-  const box = 'rounded-xl border border-slate-700 bg-slate-950/60 p-4';
-  if (competition.type === 'LEAGUE') {
-    const rankDelta = competition.rankBefore - competition.rank;
-    const isBundes = String(competition.leagueTitle || '').includes('분데스');
-    return (
-      <div className={box} data-testid="competition-summary">
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">
-          {competition.leagueTitle || '프로 리그'} {competition.round}/{competition.totalRounds}라운드 결과
-        </h3>
-        <p className="mb-2 text-sm text-slate-200">
-          현재 <b className="text-white">{competition.rank}위</b> · 승점 {competition.points}
-          {rankDelta !== 0 && (
-            <span className={rankDelta > 0 ? 'ml-2 text-emerald-300' : 'ml-2 text-rose-300'}>
-              {rankDelta > 0 ? `▲${rankDelta}` : `▼${-rankDelta}`}
-            </span>
-          )}
-        </p>
-        <StandingsTable rows={competition.standings} limit={20} isBundesliga={isBundes} />
-        {competition.seasonEnd && (
-          <p className="mt-3 rounded-lg bg-amber-500/10 p-2 text-center text-sm font-bold text-amber-200">
-            🏁 시즌 종료! 최종 {competition.seasonEnd.rank}위 ·{' '}
-            {competition.seasonEnd.champion
-              ? '🏆 리그 우승 및 챔피언스리그 직행!'
-              : competition.seasonEnd.rank <= 4
-              ? '🟦 챔피언스리그 진출 확정!'
-              : competition.seasonEnd.rank <= 6
-              ? '🟧 유로파리그 진출 확정!'
-              : competition.seasonEnd.promoted
-              ? '🔺 1부 리그 승격!'
-              : competition.seasonEnd.relegated
-              ? '🔻 하위 리그 강등'
-              : '리그 잔류'}
-          </p>
-        )}
-      </div>
-    );
-  }
-  if (competition.type === 'CUP' || (competition.type === 'WORLD_CUP' && competition.phase === 'KNOCKOUT')) {
-    const m = competition.match;
-    const userIsA = m.a === 'USER';
-    const [ug, og] = userIsA ? [m.ga, m.gb] : [m.gb, m.ga];
-    const pens = m.pens ? (userIsA ? m.pens : [m.pens[1], m.pens[0]]) : null;
-    return (
-      <div className={box} data-testid="competition-summary">
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">{competition.roundName}</h3>
-        <p className="text-sm text-slate-200">
-          정규시간 {ug}:{og}
-          {m.et && ` · 연장 ${userIsA ? m.et[0] : m.et[1]}:${userIsA ? m.et[1] : m.et[0]}`}
-          {pens && ` · 승부차기 ${pens[0]}:${pens[1]}`}
-        </p>
-        <p className={`mt-2 text-sm font-bold ${competition.advanced ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {competition.champion ? '🏆 우승을 차지했습니다!' : competition.advanced ? '✅ 다음 라운드 진출!' : '❌ 탈락했습니다.'}
-        </p>
-      </div>
-    );
-  }
-  if (competition.type === 'WORLD_CUP') {
-    return (
-      <div className={box} data-testid="competition-summary">
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">
-          월드컵 조별리그 {competition.matchday}차전 · A조 순위
-        </h3>
-        <StandingsTable rows={competition.groupStandings.A} limit={4} division={2} />
-        {competition.advanced !== undefined && (
-          <p className={`mt-3 text-center text-sm font-bold ${competition.advanced ? 'text-emerald-300' : 'text-rose-300'}`}>
-            {competition.advanced ? '✅ 8강 토너먼트 진출!' : '❌ 조별리그 탈락'}
-          </p>
-        )}
-      </div>
-    );
-  }
-  if (competition.type === 'TOWER') {
-    return (
-      <div className={box} data-testid="competition-summary">
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">
-          Stage {competition.stageId} · {competition.title}
-        </h3>
-        <p className="text-xs text-slate-400">목표: {competition.objective.text}</p>
-        <p className={`mt-2 text-sm font-bold ${competition.cleared ? 'text-emerald-300' : 'text-rose-300'}`}>
-          {competition.cleared ? (competition.firstClear ? '🎉 첫 클리어! 큰 보상 획득' : '✅ 클리어 (반복 보상)') : '❌ 목표 미달성'}
-        </p>
-      </div>
-    );
-  }
-  if (competition.type === 'RANKED') {
-    return (
-      <div className={box} data-testid="competition-summary">
-        <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">랭크 결과</h3>
-        <p className="text-sm text-slate-200">
-          {competition.rpBefore} RP → <b className="text-white">{competition.rpAfter} RP</b>{' '}
-          <span className={competition.delta >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
-            ({competition.delta >= 0 ? '+' : ''}
-            {competition.delta})
-          </span>
-        </p>
-      </div>
-    );
-  }
-  return null;
-}
-
 export default function FullTimeReportModal({
+  open,
+  homeTeam,
+  awayTeam,
   finishState,
-  homeName,
-  awayName,
-  homeStats,
-  awayStats,
-  score,
-  onRetry,
-  onContinue,
-  onQuickNext,
-  quickNextLabel = '다음 경기 바로 진행',
+  onRetrySave,
+  onConfirmExit,
 }) {
-  const report = finishState.report;
-  const outcome = report?.outcome || (score.home > score.away ? 'WIN' : score.home === score.away ? 'DRAW' : 'LOSE');
-  const meta = OUTCOME_META[outcome];
+  if (!open) return null;
+
+  const report = finishState?.report;
+  const comp = report?.competition;
+  const isChampion = Boolean(
+    comp?.champion ||
+      comp?.seasonEnd?.champion ||
+      comp?.newlyClinchedByUser ||
+      report?.rewards?.breakdown?.isChampion
+  );
+  const isEarlyClinch = Boolean(comp?.newlyClinchedByUser && !comp?.finished);
+
+  const hStats = report?.homeStats || homeTeam?.stats || {};
+  const aStats = report?.awayStats || awayTeam?.stats || {};
+  const homeOffsides = homeTeam?.stats?.offsides ?? hStats.offsides ?? 0;
+  const awayOffsides = awayTeam?.stats?.offsides ?? aStats.offsides ?? 0;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 p-4 backdrop-blur-sm" data-testid="fulltime-modal">
-      <div className={`mx-auto max-w-4xl space-y-4 rounded-2xl border bg-gradient-to-b p-5 shadow-2xl ${meta.bg}`}>
-        <header className="text-center">
-          <p className="text-[11px] font-bold uppercase tracking-[0.35em] text-slate-400">Full Time</p>
-          <p className={`mt-1 text-lg font-black ${meta.className}`}>{meta.label}</p>
-          <p className="mt-1 text-5xl font-black text-white">
-            {score.home} <span className="text-slate-600">:</span> {score.away}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            {homeName} vs {awayName}
-          </p>
-        </header>
-
-        {/* 경기 종료 직후 즉시 최종 매치 통계 표시 */}
-        <FullTimeMatchStatsSection report={report} fallbackHomeStats={homeStats} fallbackAwayStats={awayStats} />
-
-        {finishState.status === 'saving' && (
-          <p className="flex items-center justify-center gap-2 py-6 text-sm text-slate-300">
-            <Loader2 className="h-4 w-4 animate-spin" /> 경기 결과를 서버에 저장하고 정산하는 중...
-          </p>
-        )}
-        {finishState.status === 'error' && (
-          <div className="space-y-3 rounded-xl border border-red-500/50 bg-red-950/30 p-4 text-center">
-            <p className="text-sm font-semibold text-red-200">{finishState.message}</p>
-            <button
-              type="button"
-              onClick={onRetry}
-              className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500"
-            >
-              <RefreshCw className="h-4 w-4" /> 저장 다시 시도
-            </button>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-md"
+      data-testid="fulltime-modal"
+    >
+      <div className="max-h-[92vh] w-full max-w-4xl space-y-4 overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+        {/* 시즌 우승 / 대회 우승 / 조기 우승 확정 시 특별 세레머니 배너 */}
+        {isChampion && (
+          <div className="relative overflow-hidden rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-600/30 via-yellow-500/20 to-amber-600/30 p-6 text-center shadow-2xl">
+            <div className="flex justify-center gap-2 text-amber-300">
+              <Sparkles className="h-6 w-6 animate-pulse" />
+              <Crown className="h-8 w-8 text-yellow-300" />
+              <Sparkles className="h-6 w-6 animate-pulse" />
+            </div>
+            <h2 className="mt-2 text-3xl font-black tracking-wider text-white">
+              🏆 {isEarlyClinch ? '리그 조기 우승 확정!' : `${comp?.label || '대회'} 최종 우승!`} 🎉
+            </h2>
+            <p className="mt-1 text-sm font-bold text-amber-200">
+              {isEarlyClinch
+                ? `남은 경기 결과와 관계없이 ${homeTeam?.name} 구단이 압도적인 승점 차로 이번 시즌 챔피언에 등극했습니다!`
+                : `축하합니다! ${homeTeam?.name} 구단이 모든 경쟁자를 물리치고 정상에 올라 트로피를 들어 올립니다!`}
+            </p>
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-amber-400 px-4 py-1 text-xs font-black text-slate-950">
+              <Trophy className="h-4 w-4" /> 챔피언 특별 보너스 지급 완료
+            </div>
           </div>
         )}
-        {report && (
-          <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <MomCard mom={report.mom} />
-              <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4" data-testid="rewards-box">
-                <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">보상 내역</h3>
-                <ul className="space-y-1 text-sm">
-                  <li className="flex justify-between text-slate-300">
-                    <span>경기 보상</span>
-                    <b className="text-amber-300">+{formatNumber(report.rewards.breakdown.match)} G</b>
-                  </li>
-                  <li className="flex justify-between text-slate-300">
-                    <span>후원사 ({report.rewards.breakdown.sponsorName})</span>
-                    <b className="text-amber-300">+{formatNumber(report.rewards.breakdown.sponsor)} G</b>
-                  </li>
-                  {report.rewards.breakdown.competition > 0 && (
-                    <li className="flex justify-between text-slate-300">
-                      <span>대회 보상</span>
-                      <b className="text-amber-300">+{formatNumber(report.rewards.breakdown.competition)} G</b>
-                    </li>
-                  )}
-                  {report.rewards.cashFree > 0 && (
-                    <li className="flex justify-between text-slate-300">
-                      <span>무료 캐시</span>
-                      <b className="text-sky-300">+{formatNumber(report.rewards.cashFree)}</b>
-                    </li>
-                  )}
-                  <li className="flex justify-between border-t border-slate-700 pt-1 text-slate-100">
-                    <span className="font-bold">합계</span>
-                    <b className="text-amber-300">+{formatNumber(report.rewards.gold)} G</b>
-                  </li>
-                </ul>
+
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-4">
+          <div>
+            <span className="rounded bg-blue-600/20 px-2 py-0.5 text-[10px] font-bold text-blue-300">FULL TIME REPORT</span>
+            <h3 className="mt-1 text-xl font-black text-white">
+              {homeTeam?.name} <span className="text-amber-300">{homeTeam?.score}</span> :{' '}
+              <span className="text-amber-300">{awayTeam?.score}</span> {awayTeam?.name}
+            </h3>
+          </div>
+          {report?.mom && (
+            <div className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+              <Award className="h-5 w-5 text-amber-400" />
+              <div>
+                <p className="text-[10px] font-bold text-amber-300">MAN OF THE MATCH</p>
+                <p className="font-black text-white">
+                  {report.mom.name} ({report.mom.position}) · ★{report.mom.rating}
+                </p>
               </div>
             </div>
-            <CompetitionSummary competition={report.competition} />
-            <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-widest text-slate-300">선수 평점 (공격 · 중원 · 수비 기여도 반영)</h3>
-              <table className="w-full text-xs" data-testid="ratings-table">
-                <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-slate-500">
-                    <th className="py-1">선수</th>
-                    <th>포지션</th>
-                    <th className="text-center">출전</th>
-                    <th className="text-center">득점</th>
-                    <th className="text-center">도움</th>
-                    <th className="text-center">카드</th>
-                    <th>평점</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...report.players]
-                    .sort((a, b) => b.rating - a.rating)
-                    .map((p) => (
-                      <tr
-                        key={p.userPlayerId}
-                        className={`text-slate-300 ${report.mom && p.userPlayerId === report.mom.userPlayerId ? 'bg-yellow-500/10' : ''}`}
-                      >
-                        <td className="py-1 font-semibold text-slate-100">
-                          {report.mom && p.userPlayerId === report.mom.userPlayerId && '🏅 '}
-                          {p.name}
-                        </td>
-                        <td>{p.position}</td>
-                        <td className="text-center">{p.minutes}&apos;</td>
-                        <td className="text-center">{p.goals || '-'}</td>
-                        <td className="text-center">{p.assists || '-'}</td>
-                        <td className="text-center">
-                          {p.yellow > 0 && '🟨'}
-                          {p.red > 0 && '🟥'}
-                          {!p.yellow && !p.red && '-'}
-                        </td>
-                        <td>
-                          <RatingBar rating={p.rating} />
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={onContinue}
-                className="rounded-xl border border-slate-600 bg-slate-800 px-5 py-2.5 text-sm font-bold text-slate-100 hover:bg-slate-700"
-                data-testid="continue-button"
-              >
-                계속하기
-              </button>
-              {onQuickNext && (
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="space-y-2.5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">팀 주요 매치 통계 (오프사이드 포함)</h4>
+            <StatCompareRow label="점유율" homeVal={hStats.possession ?? 50} awayVal={aStats.possession ?? 50} unit="%" />
+            <StatCompareRow label="슈팅" homeVal={hStats.shots ?? 0} awayVal={aStats.shots ?? 0} />
+            <StatCompareRow label="유효 슈팅" homeVal={hStats.shotsOnTarget ?? 0} awayVal={aStats.shotsOnTarget ?? 0} />
+            <StatCompareRow label="코너킥" homeVal={hStats.corners ?? 0} awayVal={aStats.corners ?? 0} />
+            <StatCompareRow label="오프사이드" homeVal={homeOffsides} awayVal={awayOffsides} />
+            <StatCompareRow label="반칙 (파울)" homeVal={hStats.fouls ?? 0} awayVal={aStats.fouls ?? 0} />
+            <StatCompareRow label="경고 / 퇴장" homeVal={`${hStats.yellowCards ?? 0}/${hStats.redCards ?? 0}`} awayVal={`${aStats.yellowCards ?? 0}/${aStats.redCards ?? 0}`} />
+            <StatCompareRow label="골키퍼 선방" homeVal={hStats.saves ?? 0} awayVal={aStats.saves ?? 0} />
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">경기 정산 보상 및 선수단 평점</h4>
+            {finishState?.status === 'saving' && (
+              <p className="flex items-center gap-2 py-6 text-xs text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" /> 경기 결과를 서버에 기록하는 중...
+              </p>
+            )}
+            {finishState?.status === 'error' && (
+              <div className="space-y-2 rounded-lg border border-rose-500/40 bg-rose-950/30 p-3 text-xs text-rose-200">
+                <p>{finishState.message}</p>
                 <button
                   type="button"
-                  onClick={onQuickNext}
-                  className="rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 px-5 py-2.5 text-sm font-black text-white shadow-lg hover:from-emerald-500 hover:to-blue-500"
-                  data-testid="quick-next-button"
+                  onClick={onRetrySave}
+                  className="rounded bg-rose-600 px-3 py-1 font-bold text-white hover:bg-rose-500"
                 >
-                  ⏭ {quickNextLabel}
+                  다시 저장 시도
                 </button>
-              )}
-            </div>
-          </>
-        )}
+              </div>
+            )}
+            {report && (
+              <>
+                <div className="flex flex-wrap items-center justify-between rounded-lg bg-slate-900 p-3 text-xs">
+                  <span className="flex items-center gap-1.5 font-bold text-amber-300">
+                    <Coins className="h-4 w-4" /> 총 획득 골드: +{formatNumber(report.rewards.gold)} G
+                  </span>
+                  {report.rewards.cashFree > 0 && (
+                    <span className="font-bold text-emerald-300">무료 캐시: +{formatNumber(report.rewards.cashFree)} C</span>
+                  )}
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-slate-900 text-slate-400">
+                      <tr>
+                        <th className="p-1.5 text-left">포지션</th>
+                        <th className="p-1.5 text-left">선수명</th>
+                        <th className="p-1.5 text-center">득점/도움</th>
+                        <th className="p-1.5 text-center">평점</th>
+                        <th className="p-1.5 text-right">잔여체력</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(report.players || []).map((p) => (
+                        <tr key={p.userPlayerId} className="border-t border-slate-800/70 text-slate-200">
+                          <td className="p-1.5 font-bold text-blue-300">{p.position}</td>
+                          <td className="p-1.5 font-semibold text-white">
+                            {p.name}
+                            {p.red > 0 && <span className="ml-1 text-[10px] text-rose-400">🟥퇴장(징계)</span>}
+                          </td>
+                          <td className="p-1.5 text-center">
+                            {p.goals > 0 ? `${p.goals}G ` : ''}
+                            {p.assists > 0 ? `${p.assists}A` : ''}
+                            {p.goals === 0 && p.assists === 0 ? '-' : ''}
+                          </td>
+                          <td className="p-1.5 text-center font-black text-amber-300">★{p.rating.toFixed(1)}</td>
+                          <td className="p-1.5 text-right text-sky-300">{Math.round(p.stamina)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            disabled={finishState?.status === 'saving'}
+            onClick={onConfirmExit}
+            data-testid="fulltime-confirm"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-600 px-6 py-2.5 text-sm font-black text-white shadow-lg hover:from-blue-500 hover:to-emerald-500 disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-4 w-4" /> 확인 및 로비로 이동
+          </button>
+        </div>
       </div>
     </div>
   );

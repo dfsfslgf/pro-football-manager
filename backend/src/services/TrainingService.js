@@ -44,19 +44,16 @@ async function withTransaction(fn) {
   }
 }
 
-/**
- * 한계돌파 단계별 성공 확률 계산 (단계가 올라갈수록 확률 감소)
- */
 function getBreakthroughRate(currentMaxLevel) {
-  if (currentMaxLevel <= 20) return 0.70; // 1단계 돌파 (Lv.20 -> 25): 70%
-  if (currentMaxLevel <= 25) return 0.50; // 2단계 돌파 (Lv.25 -> 30): 50%
-  if (currentMaxLevel <= 30) return 0.35; // 3단계 돌파 (Lv.30 -> 35): 35%
-  return 0.20; // 4단계 이상 돌파: 20%
+  if (currentMaxLevel <= 20) return 0.70;
+  if (currentMaxLevel <= 25) return 0.50;
+  if (currentMaxLevel <= 30) return 0.35;
+  return 0.20;
 }
 
 export default class TrainingService {
   /**
-   * 일반 레벨업 특훈 및 중복 보유 선수를 활용한 한계돌파(+5 최대레벨 확장) 통합 처리
+   * 일반 레벨업 특훈 및 중복 보유 선수를 활용한 한계돌파(+5 최대레벨 확장) 처리
    */
   static async levelUp(userId, userPlayerId) {
     return withTransaction(async (conn) => {
@@ -72,31 +69,35 @@ export default class TrainingService {
       ]);
       const currentMaxLevel = Number(maxRows?.[0]?.maxLevel || TRAINING.MAX_LEVEL || 20);
 
-      // 현재 레벨이 최대 레벨에 도달한 경우: 중복 보유 선수를 이용한 한계돌파 시도
+      // 현재 레벨이 최대 레벨에 도달한 경우 중복 보유 선수를 찾아 한계돌파 진행
       if (player.level >= currentMaxLevel) {
         if (currentMaxLevel >= 40) {
           throw new ValidationError('최종 한계돌파 레벨(Lv.40)에 도달했습니다.');
         }
 
-        // 동일 마스터 ID(player_master_id)를 가진 비선발/비벤치 중복 선수 조회
-        const [dups] = await conn.query(
-          `SELECT id, level FROM user_players 
-           WHERE user_id = ? AND player_master_id = ? AND id != ? AND is_starter = 0 AND lineup_slot IS NULL 
-           ORDER BY level ASC LIMIT 1 FOR UPDATE`,
-          [userId, player.playerId, userPlayerId]
-        );
+        // ClubRepository.getFullPlayers를 사용하여 DB 컬럼명 차이와 무관하게 동일 마스터(playerId) 또는 동명 중복 선수 조회
+        const allOwned = await ClubRepository.getFullPlayers(conn, userId);
+        const dupCandidates = allOwned
+          .filter(
+            (p) =>
+              p.userPlayerId !== Number(userPlayerId) &&
+              (p.playerId === player.playerId || p.name === player.name) &&
+              !p.isStarter &&
+              p.lineupSlot === null
+          )
+          .sort((a, b) => a.level - b.level);
 
-        if (!dups || dups.length === 0) {
+        if (dupCandidates.length === 0) {
           throw new ValidationError(
-            `현재 최대 레벨(Lv.${currentMaxLevel})입니다. 한계돌파(+5레벨 확장)를 하려면 스카우트 등으로 획득한 동일한 중복 선수(예비 명단 상태)가 필요합니다.`
+            `현재 최대 레벨(Lv.${currentMaxLevel})입니다. 한계돌파(+5레벨 확장)를 하려면 동일한 중복 선수(선발/후보에 배치되지 않은 예비 상태)가 필요합니다.`
           );
         }
 
-        const dupCardId = Number(dups[0].id);
+        const dupCardId = Number(dupCandidates[0].userPlayerId);
         const breakthroughCost = TRAINING.levelUpCost(player.level) * 2;
         await WalletService.spendGold(conn, wallet, breakthroughCost, 'TRAINING_BREAKTHROUGH');
 
-        // 재료로 사용된 중복 선수 카드 소모
+        // 재료로 사용된 중복 선수 카드 삭제
         await ClubRepository.deletePlayer(conn, userId, dupCardId);
 
         const btRate = player.bonusGauge >= 100 ? 1.0 : getBreakthroughRate(currentMaxLevel);
@@ -134,7 +135,6 @@ export default class TrainingService {
         };
       }
 
-      // 일반 레벨업 특훈
       const cost = TRAINING.levelUpCost(player.level);
       await WalletService.spendGold(conn, wallet, cost, 'TRAINING_LEVEL_UP');
 

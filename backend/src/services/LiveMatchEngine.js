@@ -366,8 +366,8 @@ export default class LiveMatchEngine {
       await conn.beginTransaction();
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('유저 지갑 정보를 찾을 수 없습니다.');
-      const ids = validated.entries.map((e) => e.userPlayerId);
-      const positions = await ClubRepository.getPlayerPositions(conn, userId, ids);
+      const ids = validated.entries.map((e) => e.userPlayerId).filter((id) => id > 0);
+      const positions = ids.length > 0 ? await ClubRepository.getPlayerPositions(conn, userId, ids) : new Map();
 
       const { players, mom } = LiveMatchEngine.buildPlayerReports(validated, positions, outcome);
       const club = await ClubRepository.findClub(conn, userId);

@@ -15,6 +15,8 @@ const DEFAULT_TEAM_TACTICS = {
   defensiveLine: 'NORMAL',
   pressing: 'MEDIUM',
   offsideTrap: 'OFF',
+  cornerDefense: 'FULLBACKS', 
+  cornerKicker: 'BEST_PASSER', freeKickKicker: 'BEST_SHOOTER'
 };
 
 const POS_ORDER = { FW: 1, MF: 2, DF: 3, GK: 4 };

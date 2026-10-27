@@ -71,22 +71,27 @@ export default function PreMatchLobbyPage() {
   const go = useNavStore((s) => s.go);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
-
+  const wcNation = params?.nation || selectedWorldCupNation;
   // 경기 전 로비 진입 시 항상 서버에서 최신 체력 및 징계 상태를 강제 동기화함
   useEffect(() => {
+    
     if (!pending) {
       go('modes');
+      return;
+    }
+    if (pending.mode === 'WORLD_CUP') {
+      useSquadStore.getState().loadNationalSquad(wcNation || 'KOR');
     } else {
       useSquadStore.getState().loadSquad(true);
     }
-  }, [pending, go]);
+  }, [pending, wcNation, go]);
 
   if (!pending) return null;
   const { mode, stageId, next } = pending;
   const { opponent, scenario } = next;
   const meta = MODE_META[mode];
 
-  const wcNation = params?.nation || selectedWorldCupNation;
+
   const displayHomeName = mode === 'WORLD_CUP' && wcNation ? `${wcNation.name} 대표팀` : club.name;
   const displayHomeEmblem = mode === 'WORLD_CUP' && wcNation?.emblem ? wcNation.emblem : club.emblemIcon;
 
@@ -95,7 +100,7 @@ export default function PreMatchLobbyPage() {
     setNotice(null);
 
     const suspendedStarters = (starters || []).filter((p) => (p.suspendedMatches || 0) > 0);
-    if (suspendedStarters.length > 0) {
+    if (suspendedStarters.length > 0 && mode !== 'WORLD_CUP') {
       setNotice({
         type: 'error',
         text: `퇴장 징계로 출전 정지 중인 선수(${suspendedStarters.map((p) => `${p.name} [잔여 ${p.suspendedMatches}경기]`).join(', ')})가 선발에 포함되어 있습니다. 후보 선수로 교체해 주세요.`,
@@ -104,12 +109,16 @@ export default function PreMatchLobbyPage() {
       return;
     }
 
-    const saved = await useSquadStore.getState().saveSquad();
-    if (!saved.success) {
-      setNotice({ type: 'error', text: saved.message });
-      setBusy(false);
-      return;
+    // 클럽 모드일 때만 DB에 라인업을 저장하고, 월드컵 모드는 실제 국가대표 로스터 그대로 경기에 진입함
+    if (mode !== 'WORLD_CUP') {
+      const saved = await useSquadStore.getState().saveSquad();
+      if (!saved.success) {
+        setNotice({ type: 'error', text: saved.message });
+        setBusy(false);
+        return;
+      }
     }
+
     try {
       const session = await startLiveSession({ mode, stageId: next.stageId ?? stageId ?? null });
       const squad = useSquadStore.getState();

@@ -15,7 +15,7 @@ import {
   isValidInstruction,
 } from '../constants/tacticsConfig.js';
 import { computeEffectiveStats } from '../utils/playerStats.js';
-
+import { buildNationalSquad } from '../constants/nationalSquads.js';
 const BENCH_STORAGE_KEY = 'pfm_saved_bench_ids_v1';
 
 // 포지션 대분류 및 세부 포지션 정렬 가중치 (GK -> DF -> MF -> FW 순서)
@@ -284,6 +284,36 @@ export const useSquadStore = create((set, get) => ({
       set({ isLoading: false, error: errorMessage(err) });
       return false;
     }
+  },
+
+  isNationalMode: false,
+  nationalCode: null,
+
+  /**
+   * 2026 월드컵 모드 진입 시 선택한 국가의 실제 월드컵 대표팀 22인 명단으로 라인업을 구성함
+   */
+  /**
+   * 2026 월드컵 모드 진입 시 선택한 국가의 실제 월드컵 26인 최종 엔트리(선발 11 + 벤치 11 + 예비 4 = 26명)로 구성함
+   */
+  loadNationalSquad: (nationObjOrCode) => {
+    const code = typeof nationObjOrCode === 'string' ? nationObjOrCode : nationObjOrCode?.code || 'KOR';
+    const natData = buildNationalSquad(code);
+    const formation = FORMATIONS[natData.formation] ? natData.formation : DEFAULT_FORMATION;
+    const slots = getFormationSlots(formation);
+    const assignedStarters = assignPlayersByFamiliarity(natData.starters, slots).filter(Boolean);
+
+    set({
+      isNationalMode: true,
+      nationalCode: code,
+      formation,
+      starters: assignedStarters.map((p, i) => toStarter(p, slots[i])),
+      bench: sortPlayersByPosition([...natData.bench, ...(natData.reserve || [])].map(toBenchPlayer)),
+      reserve: [],
+      loaded: true,
+      isLoading: false,
+      dirty: false,
+    });
+    return true;
   },
 
   saveSquad: async () => {

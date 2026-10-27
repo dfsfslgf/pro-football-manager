@@ -64,14 +64,17 @@ export const GAME_RULES = Object.freeze({
   }),
 
   POSITION_FAMILIARITY_MULTIPLIER: Object.freeze({ NATURAL: 1.0, ADEQUATE: 0.9, UNFAMILIAR: 0.75, SEVERE: 0.4 }),
-
+  
   TEAM_TACTIC_OPTIONS: Object.freeze({
     mentality: Object.freeze(['PARK_THE_BUS', 'DEFENSIVE', 'BALANCED', 'ATTACKING', 'ALL_OUT_ATTACK']),
     passingStyle: Object.freeze(['SHORT', 'MIXED', 'DIRECT_LONG']),
     tempo: Object.freeze(['SLOW', 'NORMAL', 'FAST']),
     defensiveLine: Object.freeze(['DEEP', 'NORMAL', 'HIGH']),
     pressing: Object.freeze(['LOW', 'MEDIUM', 'HIGH']),
-    offsideTrap: Object.freeze(['OFF', 'ON']), 
+    offsideTrap: Object.freeze(['OFF', 'ON']),
+    cornerDefense: Object.freeze(['FULLBACKS', 'CDM_AND_FB', 'CENTERBACKS']),
+    cornerKicker: Object.freeze(['BEST_PASSER', 'WINGER_CAM', 'FULLBACK']),
+    freeKickKicker: Object.freeze(['BEST_SHOOTER', 'FORWARD', 'MIDFIELDER']),
   }),
 
   TEAM_TACTIC_STAMINA_MULTIPLIER: Object.freeze({

@@ -507,7 +507,7 @@ const leagueHandler = {
     };
   },
 
-  apply({ userId, state, userGoals, oppGoals }) {
+ apply({ userId, state, userGoals, oppGoals }) {
     const round = state.round;
     const rng = createRng(`lg-sim:${userId}:${state.season}:${round}`);
     const results = [];
@@ -526,6 +526,15 @@ const leagueHandler = {
 
     const standings = rankRows(Object.values(state.table));
     const me = standings.find((r) => r.id === 'USER');
+
+    // 조기 우승 확정(Early Title Clinch) 여부 계산
+    const clinchInfo = checkEarlyTitleClinch(standings, round, state.totalRounds);
+    const newlyClinchedByUser = clinchInfo.clinched && clinchInfo.winnerId === 'USER' && !state.earlyTitleClinched;
+    if (clinchInfo.clinched && clinchInfo.winnerId === 'USER') {
+      state.earlyTitleClinched = true;
+      state.earlyClinchRound = state.earlyClinchRound || round;
+    }
+
     const summary = {
       type: 'LEAGUE',
       leagueTitle: state.leagueTitle,
@@ -537,6 +546,9 @@ const leagueHandler = {
       points: me.pts,
       standings,
       results,
+      earlyTitleClinched: Boolean(state.earlyTitleClinched),
+      newlyClinchedByUser,
+      champion: newlyClinchedByUser, // 조기 우승 확정 시에도 즉시 우승 세레머니 이펙트 표시
     };
 
     let reward = { gold: 0, cashFree: 0 };
@@ -562,7 +574,6 @@ const leagueHandler = {
       const relegateCount = isSmallLeague ? 2 : 3;
       const relegateThreshold = totalTeams - relegateCount + 1;
 
-      // 강등된 구단과 2부에서 승격할 구단을 계산하여 다음 시즌 로스터에 반영함
       const relegatedRows = standings.slice(-relegateCount).filter((r) => r.id !== 'USER');
       state.relegatedClubNames = relegatedRows.map((r) => r.name);
 
@@ -580,6 +591,7 @@ const leagueHandler = {
           ? 2
           : state.division;
 
+      summary.champion = rank === 1;
       summary.seasonEnd = {
         rank,
         champion: rank === 1,
@@ -594,13 +606,14 @@ const leagueHandler = {
   },
 
   overview(state, status) {
-    const title = state.leagueTitle || `${state.division}부 리그`;
-    const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
-    if (status === 'FINISHED') return `시즌 ${state.season}${tierBadge} 종료 · ${title} ${state.finalRank}위`;
-    const me = rankRows(Object.values(state.table)).find((r) => r.id === 'USER');
-    const currentRound = Math.min(state.round, state.totalRounds);
-    return `${title}${tierBadge} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위`;
-  },
+      const title = state.leagueTitle || `${state.division}부 리그`;
+      const tierBadge = (state.tierLevel || 1) > 1 ? ` [Lv.${state.tierLevel}]` : '';
+      if (status === 'FINISHED') return `시즌 ${state.season}${tierBadge} 종료 · ${title} ${state.finalRank}위`;
+      const me = rankRows(Object.values(state.table || {})).find((r) => r.id === 'USER');
+      const currentRound = Math.min(state.round || 1, state.totalRounds || 38);
+      const clinchTag = state.earlyTitleClinched ? ' · 🏆 조기 우승 확정' : '';
+      return `${title}${tierBadge} · 시즌 ${state.season} · ${currentRound}/${state.totalRounds}R · ${me ? me.rank : 1}위${clinchTag}`;
+   },
 };
 
 function pairUp(ids) {
@@ -987,6 +1000,19 @@ function tierOf(rp) {
   return { tier: RANK_TIERS[index], index };
 }
 
+function checkEarlyTitleClinch(standings, currentRound, totalRounds) {
+  if (!Array.isArray(standings) || standings.length < 2) return { clinched: false, winnerId: null };
+  const remainingMatches = Math.max(0, totalRounds - currentRound);
+  const maxPossibleGain = remainingMatches * 3;
+  const first = standings[0];
+  const second = standings[1];
+  // 2위 팀이 남은 경기를 전승하고 1위 팀이 전패해도 승점 역전이 불가능한 경우 조기 우승 확정
+  if (first.pts - second.pts > maxPossibleGain) {
+    return { clinched: true, winnerId: first.id, winnerName: first.name, remainingMatches };
+  }
+  return { clinched: false, winnerId: null };
+}
+
 const rankedHandler = {
   create() {
     return { rp: RANKED.START_RP, wins: 0, draws: 0, losses: 0, matches: 0, streak: 0, history: [] };
@@ -1083,15 +1109,35 @@ export default class CompetitionService {
     });
   }
 
-  static async getState(userId, mode) {
+static async getState(userId, mode) {
     const handler = handlerFor(mode);
     const row = await ClubRepository.getCompetition(null, userId, mode);
-    if (!row) return { mode, label: MODE_LABELS[mode], status: 'NONE', summary: '아직 시작하지 않았습니다.', state: null };
-    const view = { mode, label: MODE_LABELS[mode], status: row.status, summary: handler.overview(row.state, row.status), state: row.state };
-    if (mode === 'LEAGUE') view.standings = rankRows(Object.values(row.state.table));
+    if (!row || !row.state) {
+      return { mode, label: MODE_LABELS[mode], status: 'NONE', summary: '아직 시작하지 않았습니다.', state: null };
+    }
+    const view = {
+      mode,
+      label: MODE_LABELS[mode],
+      status: row.status,
+      summary: handler.overview(row.state, row.status),
+      state: row.state,
+    };
+    if (mode === 'LEAGUE' && row.state.table) {
+      view.standings = rankRows(Object.values(row.state.table));
+    }
     if (mode === 'WORLD_CUP') {
+      // 구버전(4개 조) 세이브 데이터와 신버전(12개 조) 모두 에러 없이 호환되도록 존재하는 그룹 키만 매핑함
+      const rawGroups = row.state.groups || {};
+      const validGroupKeys = Object.keys(rawGroups).filter((g) => Array.isArray(rawGroups[g]));
       view.groupStandings = Object.fromEntries(
-        WORLD_CUP.GROUPS.map((g) => [g, rankRows(row.state.groups[g].map((id) => row.state.table[id]))])
+        validGroupKeys.map((g) => [
+          g,
+          rankRows(
+            rawGroups[g]
+              .map((id) => row.state.table?.[id])
+              .filter(Boolean)
+          ),
+        ])
       );
     }
     if (mode === 'RANKED') view.tiers = RANK_TIERS;

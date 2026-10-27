@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ArrowLeftRight } from 'lucide-react';
 import useLiveMatchStore from '../../../store/useLiveMatchStore.js';
-import useSquadStore from '../../../store/useSquadStore.js';
+import useSquadStore, { sortPlayersByPosition } from '../../../store/useSquadStore.js';
 import { FORMATION_CODES } from '../../../constants/formations.js';
 import { MATCH_RULES } from '../../../constants/matchConfig.js';
 import {
@@ -22,7 +22,7 @@ import StaminaBar from '../../common/StaminaBar.jsx';
 import InteractiveMiniPitch from '../liveMatch/InteractiveMiniPitch.jsx';
 
 const TONE_CLASS = { good: 'text-emerald-300', bad: 'text-red-300', neutral: 'text-slate-300' };
-const POS_FILTER_TABS = ['ALL', 'FW', 'MF', 'DF', 'GK'];
+const POS_FILTER_TABS = ['ALL', 'GK', 'DF', 'MF', 'FW'];
 
 function useWorkspaceModel(source) {
   const homeTeam = useLiveMatchStore((s) => s.homeTeam);
@@ -103,9 +103,6 @@ function Feedback({ feedback }) {
   );
 }
 
-/**
- * [요구사항 49 반영] 선수 카드 하단에 구체적인 수치(골결정력, 스피드, 패스, 수비 등)를 한눈에 보여주는 배지 바
- */
 function InlineNumericStats({ player }) {
   const st = player.effectiveStats || player.baseStats || {};
   if (player.mainPosition === 'GK' || player.slotRoleCode === 'GK') {
@@ -129,13 +126,16 @@ function InlineNumericStats({ player }) {
 }
 
 function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
-  const stamina = player.currentStamina ?? player.stamina;
+  const stamina = player.currentStamina ?? player.stamina ?? 100;
   const exhausted = isLive && !player.isSentOff && stamina <= MATCH_RULES.EXHAUSTED_STAMINA;
   const preferred = player.roleCodes?.length
     ? ` (${player.roleCodes.join('/')})`
     : player.preferredRoleCode
     ? ` (${player.preferredRoleCode})`
     : '';
+
+  // 경기 중에는 캔버스와 동일한 liveRating 값을 우선 참조하여 평점 일치 보장
+  const liveRatingValue = Number(player.liveRating ?? player.rating ?? getRating(player) ?? 6.0).toFixed(1);
 
   if (player.isSentOff) {
     return (
@@ -167,10 +167,17 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
     >
       <div className="flex items-center gap-2 text-xs">
         <span className="w-10 rounded bg-slate-700 py-0.5 text-center font-bold text-slate-200">{player.slotRoleCode}</span>
-        <span className="flex-1 truncate font-semibold text-slate-100">{player.name}</span>
+        <span className="flex-1 truncate font-semibold text-slate-100">
+          {player.name}
+          {(player.suspendedMatches || 0) > 0 && (
+            <span className="ml-1.5 rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">
+              🟥 징계 {player.suspendedMatches}경기
+            </span>
+          )}
+        </span>
         {player.yellowCards === 1 && <span className="h-3.5 w-2.5 rounded-sm bg-yellow-400" title="경고 1장" />}
         <span className="font-bold text-emerald-300">
-          {isLive ? `평점 ${getRating(player).toFixed(1)}` : `OVR ${player.overall || getOverall(player)}`}
+          {isLive ? `★ 평점 ${liveRatingValue}` : `OVR ${player.overall || getOverall(player)}`}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
@@ -183,7 +190,7 @@ function FieldPlayerCard({ player, isLive, isSelected, onClick }) {
       <InlineNumericStats player={player} />
       <div className="mt-1 flex items-center gap-2">
         <StaminaBar value={stamina} showLabel className="flex-1" />
-        {exhausted && <span className="animate-pulse whitespace-nowrap text-[10px] font-bold text-red-400">체력 고갈! 교체 권장</span>}
+        {exhausted && <span className="animate-pulse whitespace-nowrap text-[10px] font-bold text-red-400">체력 고갈 · 교체 권장</span>}
       </div>
     </button>
   );
@@ -193,6 +200,7 @@ function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
   const preview = selectedFieldSlot
     ? calculatePositionFamiliarity(player.mainPosition, selectedFieldSlot.slotRoleCode, getRoleCodes(player)).familiarity
     : null;
+  const roleLabel = player.preferredRoleCode || player.mainPosition;
   return (
     <button
       type="button"
@@ -202,13 +210,22 @@ function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
       }`}
     >
       <div className="flex items-center gap-2 text-xs">
-        <span className="w-10 rounded bg-slate-700 py-0.5 text-center font-bold text-slate-200">{player.mainPosition}</span>
-        <span className="flex-1 truncate font-semibold text-slate-100">{player.name}</span>
+        <span className="w-12 rounded bg-slate-700 py-0.5 text-center font-bold text-slate-200">
+          {player.mainPosition}·{roleLabel}
+        </span>
+        <span className="flex-1 truncate font-semibold text-slate-100">
+          {player.name}
+          {(player.suspendedMatches || 0) > 0 && (
+            <span className="ml-1.5 rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold text-rose-300">
+              🟥 징계 {player.suspendedMatches}경기
+            </span>
+          )}
+        </span>
         <span className="font-bold text-emerald-300">OVR {player.overall || getOverall(player)}</span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-slate-400">
         <span>
-          주포지션: {player.mainPosition}
+          포지션: {player.mainPosition}
           {player.roleCodes?.length ? ` (${player.roleCodes.join('/')})` : player.preferredRoleCode ? ` (${player.preferredRoleCode})` : ''}
         </span>
         {preview && (
@@ -220,7 +237,7 @@ function BenchCard({ player, isSelected, selectedFieldSlot, onClick }) {
         )}
       </div>
       <InlineNumericStats player={player} />
-      <StaminaBar value={player.currentStamina ?? player.stamina} showLabel className="mt-1" />
+      <StaminaBar value={player.currentStamina ?? player.stamina ?? 100} showLabel className="mt-1" />
     </button>
   );
 }
@@ -238,20 +255,20 @@ function SubstitutionTab({ model }) {
 
   const selectedFieldSlot = selectedTarget?.kind === 'field' ? model.starters[selectedTarget.slotIndex] : null;
 
-  // [요구사항 20 반영] 벤치 및 예비 선수 포지션별 필터링 및 OVR 높은순 정렬
+  // 벤치 및 예비 선수를 능력치 역순이 아닌 포지션별(GK -> DF -> MF -> FW)로 정렬함
   const filteredBench = useMemo(
     () =>
-      [...model.bench]
-        .filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
-        .sort((a, b) => (b.overall || getOverall(b)) - (a.overall || getOverall(a))),
+      sortPlayersByPosition(
+        (model.bench || []).filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
+      ),
     [model.bench, posFilter]
   );
 
   const filteredReserve = useMemo(
     () =>
-      [...model.reserve]
-        .filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
-        .sort((a, b) => (b.overall || getOverall(b)) - (a.overall || getOverall(a))),
+      sortPlayersByPosition(
+        (model.reserve || []).filter((p) => (posFilter === 'ALL' ? true : p.mainPosition === posFilter))
+      ),
     [model.reserve, posFilter]
   );
 
@@ -329,7 +346,7 @@ function SubstitutionTab({ model }) {
 
         <div className="md:col-start-2 md:row-span-2 md:row-start-1 xl:col-start-2 xl:row-span-1">
           <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-            {model.isLive ? '출전 중인 필드 11명' : '선발 11명'}
+            {model.isLive ? '출전 중인 필드 11명 (실시간 평점 반영)' : '선발 11명'}
           </h3>
           <ul className="space-y-1.5">
             {model.starters.map((p) => (
@@ -353,7 +370,7 @@ function SubstitutionTab({ model }) {
                 남은 교체 {model.subsLeft}/{MATCH_RULES.MAX_SUBSTITUTIONS}
               </span>
             ) : (
-              <span className="text-emerald-300">OVR 높은순 정렬됨</span>
+              <span className="text-sky-300">포지션순 정렬 (GK→DF→MF→FW)</span>
             )}
           </h3>
           <ul className="space-y-1.5">
@@ -373,7 +390,7 @@ function SubstitutionTab({ model }) {
           {model.reserve.length > 0 && (
             <>
               <h3 className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-400">
-                예비 선수단 ({filteredReserve.length}명 · OVR 높은순)
+                예비 선수단 ({filteredReserve.length}명 · 포지션순 정렬)
               </h3>
               <ul className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
                 {filteredReserve.map((p) => (
@@ -423,7 +440,8 @@ function TeamTacticsTab({ model }) {
             <h3 className="mb-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">{group.label}</h3>
             <div className="flex flex-wrap overflow-hidden rounded-lg border border-slate-700">
               {group.options.map((option) => {
-                const active = model.tactics[group.key] === option.value;
+                const currentVal = model.tactics?.[group.key] ?? group.options[0].value;
+                const active = currentVal === option.value;
                 return (
                   <button
                     key={option.value}
@@ -556,7 +574,7 @@ export default function TacticsWorkspace({ source }) {
         ? `🔄 포지션 변경 & 선수 교체 (남은 교체: ${model.subsLeft}/${MATCH_RULES.MAX_SUBSTITUTIONS})`
         : '🔄 포지션 변경 & 선수 교체',
     },
-    { id: 'team', label: '📋 팀 세부 전술' },
+    { id: 'team', label: '📋 팀 세부 전술 & 세트피스 키커' },
     { id: 'instructions', label: '🎯 선수 개인 지침' },
   ];
 

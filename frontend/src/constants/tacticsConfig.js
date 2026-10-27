@@ -212,16 +212,34 @@ export const TEAM_TACTIC_GROUPS = [
       { value: 'ON', label: '트랩 가동 (일제 전진)' },
     ],
   },
+  {
+    key: 'cornerDefense',
+    label: '코너킥 역습 방어 잔류',
+    options: [
+      { value: 'FULLBACKS', label: '좌우 풀백 잔류 (CB 공격 가담)' },
+      { value: 'CDM_AND_FB', label: '수미+풀백 잔류 (전원 공격 가담)' },
+      { value: 'CENTERBACKS', label: '센터백 잔류 (풀백/미드 가담)' },
+    ],
+  },
+  {
+    key: 'cornerKicker',
+    label: '코너킥 전담 키커',
+    options: [
+      { value: 'BEST_PASSER', label: '패스 최고 능력자' },
+      { value: 'WINGER_CAM', label: '윙어 / 공미 전담' },
+      { value: 'FULLBACK', label: '풀백 / 윙백 전담' },
+    ],
+  },
+  {
+    key: 'freeKickKicker',
+    label: '프리킥 전담 키커',
+    options: [
+      { value: 'BEST_SHOOTER', label: '슈팅 최고 능력자' },
+      { value: 'FORWARD', label: '최전방 공격수 전담' },
+      { value: 'MIDFIELDER', label: '미드필더 전담' },
+    ],
+  },
 ];
-
-export const DEFAULT_TEAM_TACTICS = {
-  mentality: 'BALANCED',
-  passingStyle: 'MIXED',
-  tempo: 'NORMAL',
-  defensiveLine: 'NORMAL',
-  pressing: 'MEDIUM',
-  offsideTrap: 'OFF',
-};
 
 export const TEAM_TACTIC_EFFECTS = Object.freeze({
   mentality: {
@@ -257,6 +275,18 @@ export const TEAM_TACTIC_EFFECTS = Object.freeze({
   },
 });
 
+export const DEFAULT_TEAM_TACTICS = {
+  mentality: 'BALANCED',
+  passingStyle: 'MIXED',
+  tempo: 'NORMAL',
+  defensiveLine: 'NORMAL',
+  pressing: 'MEDIUM',
+  offsideTrap: 'OFF',
+  cornerDefense: 'FULLBACKS',
+  cornerKicker: 'BEST_PASSER',
+  freeKickKicker: 'BEST_SHOOTER',
+};
+
 export const TEAM_TACTIC_LABELS = {
   mentality: {
     PARK_THE_BUS: '극단적 수비',
@@ -270,6 +300,21 @@ export const TEAM_TACTIC_LABELS = {
   defensiveLine: { DEEP: '깊숙이 내림', NORMAL: '보통', HIGH: '높게 올림' },
   pressing: { LOW: '낮음', MEDIUM: '보통', HIGH: '강한 압박' },
   offsideTrap: { OFF: '사용 안 함 (안전 커버)', ON: '트랩 가동 (일제 전진)' },
+  cornerDefense: {
+    FULLBACKS: '풀백 후방 대기 (CB 헤더 가담)',
+    CDM_AND_FB: '수미+풀백 후방 대기',
+    CENTERBACKS: '센터백 후방 대기',
+  },
+  cornerKicker: {
+    BEST_PASSER: '패스 최고 능력자',
+    WINGER_CAM: '윙어/공미 전담',
+    FULLBACK: '풀백 전담',
+  },
+  freeKickKicker: {
+    BEST_SHOOTER: '슈팅 최고 능력자',
+    FORWARD: '공격수 전담',
+    MIDFIELDER: '미드필더 전담',
+  },
 };
 
 export function getTacticEffect(tactics, group) {

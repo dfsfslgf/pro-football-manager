@@ -225,8 +225,10 @@ function makeInfoEvent(minute, text) {
   };
 }
 
-export function applyStaminaDrain(team, weatherMod = 1.0) {
+export function applyStaminaDrain(team, weatherMod = 1.0, opponentScore = 0) {
   const teamMod = getTeamStaminaMod(team.tactics);
+  const goalDiff = (team.score || 0) - (opponentScore || 0);
+
   for (const p of aliveOf(team)) {
     const baseTickDrain = MATCH_RULES.BASE_TICK_DRAIN_MIN + Math.random() * MATCH_RULES.BASE_TICK_DRAIN_RANGE;
     const posMod = POSITION_STAMINA_DRAIN_MULTIPLIER[p.slotRoleCode] || DEFAULT_POSITION_DRAIN;
@@ -235,6 +237,15 @@ export function applyStaminaDrain(team, weatherMod = 1.0) {
     const finalDrain = baseTickDrain * posMod * teamTacticMod * playerInstMod * weatherMod * 0.85;
     p.currentStamina = Math.max(MATCH_RULES.MIN_STAMINA, Number((p.currentStamina - finalDrain).toFixed(2)));
     p.minutesPlayed = (p.minutesPlayed || 0) + 1;
+
+    // 수비수(풀백/센터백)와 수비형 미드필더가 팀 리드 및 최소 실점을 유지할 때 평점이 5~6점대로 처지지 않도록 분당 기여도 반영
+    if (p.slotRoleGroup === 'DF' || p.slotRoleCode === 'CDM') {
+      let defTickBonus = 0.012;
+      if (opponentScore === 0) defTickBonus += 0.012;
+      if (goalDiff >= 2) defTickBonus += 0.015; // 다득점 리드 시 풀백/수비진 평점 동반 상승
+      p.liveRating = Math.min(9.5, Number(((p.liveRating ?? 6.0) + defTickBonus).toFixed(2)));
+      p.rating = p.liveRating;
+    }
   }
 }
 
@@ -360,7 +371,8 @@ function rebuildStartersForFormation(team, newFormation) {
 }
 
 /**
- * 상대 팀(AI)의 유기적인 경기 중 선수 교체, 포메이션 변경, 전술 변화 수행
+ * 상대 감독(AI)이 고정된 분이 아니라 경기 흐름(점수 차, 체력 급감, 평점 부진, 퇴장 발생)에 따라
+ * 전반 36분~후반 88분 사이 언제든 유기적으로 선수 교체와 포메이션/전술 변경을 수행함
  */
 function runAiPlanB(team, opponent, minute, events) {
   const liveDefenders = aliveOf(team).filter((p) => p.slotRoleGroup === 'DF');
@@ -368,6 +380,7 @@ function runAiPlanB(team, opponent, minute, events) {
   const liveForwards = aliveOf(team).filter((p) => p.slotRoleGroup === 'FW');
   const vacatedDefenderSlot = team.starters.find((p) => p.isSentOff && p.slotRoleGroup === 'DF');
 
+  // 수비수 퇴장 발생 시 시간 무관 즉시 수비 보강 교체
   if (liveDefenders.length < 3 && team.subsLeft > 0 && benchDefenders.length > 0 && liveForwards.length >= 2 && vacatedDefenderSlot) {
     const playerOut = liveForwards.reduce((min, p) => (p.currentStamina < min.currentStamina ? p : min));
     const playerIn = benchDefenders.reduce((best, p) => (calcPlayerOvr(p) > calcPlayerOvr(best) ? p : best));
@@ -375,7 +388,7 @@ function runAiPlanB(team, opponent, minute, events) {
     const incomingAtForwardSlot = substitutePlayer(team, playerOut, playerIn);
     swapSlots(team, incomingAtForwardSlot.slotIndex, vacatedDefenderSlot.slotIndex);
     const incoming = team.starters[vacatedDefenderSlot.slotIndex];
-    events.push(makeEvent(minute, 'SUBSTITUTION', team, incoming, outSnapshot, '수비수 퇴장 공백을 메우기 위한 전술적 수비 보강 교체'));
+    events.push(makeEvent(minute, 'SUBSTITUTION', team, incoming, outSnapshot, '수비수 퇴장 공백을 메우기 위한 즉시 수비 보강 교체'));
     if (team.tactics.mentality !== 'DEFENSIVE' && team.tactics.mentality !== 'PARK_THE_BUS') {
       team.tactics.mentality = 'DEFENSIVE';
       team.tactics.defensiveLine = 'DEEP';
@@ -383,43 +396,54 @@ function runAiPlanB(team, opponent, minute, events) {
     }
   }
 
-  // 후반 55분 이후 체력 저하(50% 이하) 또는 평점 부진(5.6 이하) 선수 유기적 교체
-  if (minute >= 55 && team.subsLeft > 0 && minute % 7 === 0) {
-    const candidatesOut = aliveOf(team)
-      .filter((p) => p.slotRoleGroup !== 'GK' && (p.currentStamina <= 52 || p.isInjured || (p.liveRating ?? 6.0) <= 5.5))
-      .sort((a, b) => a.currentStamina - b.currentStamina);
+  // 유기적 선수 교체: 38분 이후 부상자, 체력 저하(58% 이하), 또는 평점 부진(5.4 이하) 발생 시 확률적으로 즉시 교체
+  if (minute >= 38 && team.subsLeft > 0) {
+    const scoreDiff = team.score - opponent.score;
+    const staminaThreshold = minute >= 72 ? 64 : minute >= 55 ? 58 : 48;
+    const ratingThreshold = scoreDiff < 0 ? 5.7 : 5.4;
 
-    for (const playerOut of candidatesOut.slice(0, 2)) {
-      if (team.subsLeft <= 0) break;
+    const candidatesOut = aliveOf(team)
+      .filter(
+        (p) =>
+          p.slotRoleGroup !== 'GK' &&
+          (p.isInjured || p.currentStamina <= staminaThreshold || (minute >= 46 && (p.liveRating ?? 6.0) <= ratingThreshold))
+      )
+      .sort((a, b) => a.currentStamina - b.currentStamina || (a.liveRating ?? 6.0) - (b.liveRating ?? 6.0));
+
+    if (candidatesOut.length > 0 && (candidatesOut[0].isInjured || Math.random() < 0.42)) {
+      const playerOut = candidatesOut[0];
       const replacements = team.bench.filter((p) => p.mainPosition === playerOut.slotRoleGroup);
-      if (replacements.length === 0) continue;
-      const playerIn = replacements.reduce((best, p) => (calcPlayerOvr(p) > calcPlayerOvr(best) ? p : best));
-      const outSnapshot = { ...playerOut };
-      const incoming = substitutePlayer(team, playerOut, playerIn);
-      events.push(
-        makeEvent(
-          minute,
-          'SUBSTITUTION',
-          team,
-          incoming,
-          outSnapshot,
-          `${team.name} 벤치에서 기동력 보강을 위해 ${incoming.name} 선수를 교체 투입함`
-        )
-      );
+      if (replacements.length > 0) {
+        const playerIn = replacements.reduce((best, p) => (calcPlayerOvr(p) > calcPlayerOvr(best) ? p : best));
+        const outSnapshot = { ...playerOut };
+        const incoming = substitutePlayer(team, playerOut, playerIn);
+        const reason = outSnapshot.isInjured
+          ? '부상 선수 보호 교체'
+          : (outSnapshot.liveRating ?? 6.0) <= ratingThreshold
+          ? '경기력 부진 타개를 위한 전술적 교체'
+          : '기동력 유지를 위한 체력 안배 교체';
+        events.push(makeEvent(minute, 'SUBSTITUTION', team, incoming, outSnapshot, `${team.name} 벤치: ${reason} (${incoming.name} 투입)`));
+      }
     }
   }
 
-  // 후반 63분, 78분 점수 차에 따른 상대 팀 포메이션 및 전술 변화
-  if (minute === 63 || minute === 78) {
+  // 유기적 포메이션 및 전술 변경: 점수 차와 슈팅 열세에 따라 35분~86분 사이 언제든 동적으로 발동
+  const lastAiTacticMin = team.lastAiTacticMin || 0;
+  if (minute >= 35 && minute - lastAiTacticMin >= 14) {
     const scoreDiff = team.score - opponent.score;
-    if (scoreDiff < 0) {
-      const targetForm = minute === 78 ? '4-2-4' : '3-4-3';
-      if (FORMATIONS[targetForm] && team.formation !== targetForm) {
+    const shotDiff = (team.stats?.shots || 0) - (opponent.stats?.shots || 0);
+
+    // 2골 차 이상 뒤지거나 후반 중반 이후 지고 있을 때 공격적 포메이션으로 전환
+    if ((scoreDiff <= -2 || (minute >= 52 && scoreDiff < 0)) && Math.random() < 0.35) {
+      const aggressiveForms = ['3-4-3', '4-2-4', '4-3-3'].filter((f) => FORMATIONS[f] && f !== team.formation);
+      if (aggressiveForms.length > 0) {
         const prev = team.formation;
-        rebuildStartersForFormation(team, targetForm);
-        team.tactics.mentality = minute === 78 ? 'ALL_OUT_ATTACK' : 'ATTACKING';
+        const nextForm = aggressiveForms[Math.floor(Math.random() * aggressiveForms.length)];
+        rebuildStartersForFormation(team, nextForm);
+        team.tactics.mentality = minute >= 70 || scoreDiff <= -2 ? 'ALL_OUT_ATTACK' : 'ATTACKING';
         team.tactics.pressing = 'HIGH';
         team.tactics.tempo = 'FAST';
+        team.lastAiTacticMin = minute;
         events.push(
           makeEvent(
             minute,
@@ -427,17 +451,19 @@ function runAiPlanB(team, opponent, minute, events) {
             team,
             null,
             null,
-            `${team.name} 감독이 만회골을 위해 포메이션을 ${prev}에서 ${targetForm}로 변경하고 전방 압박을 지시함`
+            `${team.name} 감독이 흐름을 뒤집기 위해 포메이션을 ${prev}에서 ${nextForm}로 전격 변경함`
           )
         );
       }
-    } else if (scoreDiff > 0 && minute === 78) {
-      const targetForm = '5-4-1';
-      if (FORMATIONS[targetForm] && team.formation !== targetForm) {
+    } else if (scoreDiff === 0 && shotDiff <= -4 && minute >= 48 && Math.random() < 0.3) {
+      // 동점이지만 슈팅 수에서 밀릴 때 중원 강화 및 오프사이드 트랩 가동
+      const midForms = ['4-2-3-1', '4-1-4-1', '3-5-2'].filter((f) => FORMATIONS[f] && f !== team.formation);
+      if (midForms.length > 0) {
         const prev = team.formation;
-        rebuildStartersForFormation(team, targetForm);
-        team.tactics.mentality = 'DEFENSIVE';
-        team.tactics.defensiveLine = 'DEEP';
+        const nextForm = midForms[Math.floor(Math.random() * midForms.length)];
+        rebuildStartersForFormation(team, nextForm);
+        team.tactics.offsideTrap = 'ON';
+        team.lastAiTacticMin = minute;
         events.push(
           makeEvent(
             minute,
@@ -445,10 +471,30 @@ function runAiPlanB(team, opponent, minute, events) {
             team,
             null,
             null,
-            `${team.name} 감독이 리드를 굳히기 위해 포메이션을 ${prev}에서 ${targetForm}로 전환함`
+            `${team.name} 감독이 중원 싸움 우위를 위해 ${prev}에서 ${nextForm}로 전환하고 오프사이드 트랩을 가동함`
           )
         );
       }
+    } else if (scoreDiff >= 1 && minute >= 68 && Math.random() < 0.35) {
+      // 리드 상황에서 후반 중후반 수비 굳히기 전환
+      const defForms = ['5-4-1', '5-3-2', '4-5-1'].filter((f) => FORMATIONS[f] && f !== team.formation);
+      const nextForm = defForms.length > 0 ? defForms[0] : team.formation;
+      const prev = team.formation;
+      if (nextForm !== prev) rebuildStartersForFormation(team, nextForm);
+      team.tactics.mentality = scoreDiff === 1 && minute >= 80 ? 'PARK_THE_BUS' : 'DEFENSIVE';
+      team.tactics.defensiveLine = 'DEEP';
+      team.tactics.offsideTrap = 'OFF';
+      team.lastAiTacticMin = minute;
+      events.push(
+        makeEvent(
+          minute,
+          'TACTIC_CHANGE',
+          team,
+          null,
+          null,
+          `${team.name} 감독이 승리를 지키기 위해 수비 라인을 내리고 전술을 수비형으로 전환함`
+        )
+      );
     }
   }
 }
@@ -456,8 +502,8 @@ function runAiPlanB(team, opponent, minute, events) {
 export function simulateSingleMinuteTick(home, away, minute, weather) {
   const events = [];
   const weatherMod = weather?.staminaMod || 1.0;
-  applyStaminaDrain(home, weatherMod);
-  applyStaminaDrain(away, weatherMod);
+  applyStaminaDrain(home, weatherMod, away.score);
+  applyStaminaDrain(away, weatherMod, home.score);
   runAiPlanB(away, home, minute, events);
 
   const mHome = possessionPower(home) * MATCH_RULES.HOME_ADVANTAGE * (0.95 + (home.crowdMomentum || 60) / 1000);
@@ -740,6 +786,27 @@ export const useLiveMatchStore = create((set, get) => ({
           makeInfoEvent(minute, `🚩 [코너킥] ${attTeam.name}의 ${takerName || '키커'} 선수가 코너 플래그에서 문전으로 크로스를 준비합니다.`),
         ],
       };
+    }),
+
+    recordCanvasOffside: (attackingSide, playerName) =>
+        set((state) => {
+          const minute = Math.max(1, state.minute || 1);
+          const key = attackingSide === 'HOME' ? 'homeTeam' : 'awayTeam';
+          const attTeam = state[key];
+          if (!attTeam) return {};
+          return {
+            [key]: {
+              ...attTeam,
+              stats: {
+                ...attTeam.stats,
+                offsides: (attTeam.stats?.offsides || 0) + 1,
+              },
+            },
+            timelineEvents: [
+              ...(state.timelineEvents || []),
+              makeInfoEvent(minute, `🚩 [오프사이드] ${attTeam.name} ${playerName || '공격수'} 선수의 침투가 오프사이드에 걸립니다.`),
+            ],
+          };
     }),
 
   /**
