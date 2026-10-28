@@ -392,7 +392,7 @@ function SubstitutionTab({ model }) {
                 남은 교체 {model.subsLeft}/{MATCH_RULES.MAX_SUBSTITUTIONS}
               </span>
             ) : (
-              <span className="text-sky-300">포지션순 정렬 (GK→DF→MF→FW)</span>
+              <span className="text-sky-300"></span>
             )}
           </h3>
           <ul className="space-y-1.5">
