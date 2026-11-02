@@ -1,4 +1,4 @@
-# ⚽ Pro Football Manager (프로 풋볼 매니저)
+# Pro Football Manager (프로 풋볼 매니저)
 
 **Pro Football Manager**는 구단 감독이 되어 스쿼드와 세부 전술을 설계하고, **HTML5 Canvas 기반 실시간 2D 매치 엔진**을 통해 경기를 직접 지휘하는 웹 축구 매니지먼트 시뮬레이션 게임입니다.
 
