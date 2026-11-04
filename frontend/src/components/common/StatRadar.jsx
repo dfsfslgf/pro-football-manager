@@ -11,7 +11,7 @@ const AXES = [
 
 /**
  * 선수 능력치 8축 레이더 차트(SVG).
- * 속도/슈팅/패스/드리블/수비/피지컬/GK 반응/최대 체력을 0~100 스케일로 그립니다.
+ * 속도/슈팅/패스/드리블/수비/피지컬/GK 반응/최대 체력을 0~100 스케일로 그림.
  * @param {Object} props
  * @param {Object<string, number>} props.stats 실효 스탯(effectiveStats) 또는 기본 스탯
  * @param {Object<string, number>} [props.baseStats] staminaMax 를 읽을 기본 스탯

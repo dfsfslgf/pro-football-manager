@@ -97,6 +97,7 @@ export default function FullTimeReportModal({
   homeTeam,
   awayTeam,
   finishState,
+  shootout = null,
   onRetrySave,
   onConfirmExit,
 }) {
@@ -151,6 +152,11 @@ export default function FullTimeReportModal({
             <h3 className="mt-1 text-xl font-black text-white">
               {homeTeam?.name} <span className="text-amber-300">{homeTeam?.score}</span> :{' '}
               <span className="text-amber-300">{awayTeam?.score}</span> {awayTeam?.name}
+              {shootout && (
+                <span className="ml-2 text-sm font-bold text-slate-300">
+                  (승부차기 {shootout.home} : {shootout.away})
+                </span>
+              )}
             </h3>
           </div>
           {report?.mom && (

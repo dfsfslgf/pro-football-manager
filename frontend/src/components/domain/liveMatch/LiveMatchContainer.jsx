@@ -229,6 +229,7 @@ export default function LiveMatchContainer() {
   const homeTeam = useLiveMatchStore((s) => s.homeTeam);
   const awayTeam = useLiveMatchStore((s) => s.awayTeam);
   const context = useLiveMatchStore((s) => s.context);
+  const shootout = useLiveMatchStore((s) => s.shootout);
   const go = useNavStore((s) => s.go);
   const [isPanelOpen, setPanelOpen] = useState(false);
   const [isLeaving, setLeaving] = useState(false);
@@ -304,6 +305,7 @@ export default function LiveMatchContainer() {
         <FullTimeReportModal
           open={status === 'finished'}
           finishState={finishState}
+          shootout={shootout}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
           homeName={homeTeam.name}

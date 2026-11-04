@@ -38,15 +38,15 @@ export default function TrainingCenterPage() {
   const missingAll = tiredPlayers.reduce((sum, p) => sum + (100 - p.stamina), 0);
   const allCost = Math.ceil(missingAll * TRAINING_RULES.MEDICAL_COST_PER_POINT * TRAINING_RULES.ALL_DISCOUNT);
 
-  // 선택된 선수와 동일한 마스터 ID(playerId)를 가진 예비 중복 선수 수 계산
+  // 선택된 선수와 동일한 선수(마스터 ID 또는 이름)이면서 선발 명단(슬롯 0~10)에 없는 중복 카드 계산
   const duplicateCards = useMemo(() => {
     if (!selected) return [];
     return players.filter(
       (p) =>
-        p.playerId === selected.playerId &&
+        (p.playerId === selected.playerId || p.name === selected.name) &&
         p.userPlayerId !== selected.userPlayerId &&
         !p.isStarter &&
-        p.lineupSlot === null
+        (p.lineupSlot === null || p.lineupSlot >= 11)
     );
   }, [players, selected]);
 
@@ -135,7 +135,7 @@ export default function TrainingCenterPage() {
           <ul className="max-h-[620px] space-y-1.5 overflow-y-auto pr-1">
             {sorted.map((p) => {
               const dupCount = players.filter(
-                (other) => other.playerId === p.playerId && other.userPlayerId !== p.userPlayerId
+                (other) => (other.playerId === p.playerId || other.name === p.name) && other.userPlayerId !== p.userPlayerId
               ).length;
               return (
                 <li key={p.userPlayerId}>
@@ -187,7 +187,7 @@ export default function TrainingCenterPage() {
                       성공 시 모든 기본 능력치가 영구적으로 +2% 상승합니다. 최대 레벨 도달 시 중복 보유 선수를 재료로 사용하여 최대 레벨을 5레벨씩 확장(최대 Lv.40)할 수 있습니다.
                     </p>
                     <p className="text-xs font-bold text-amber-300">
-                      사용 가능한 예비 중복 카드: {duplicateCards.length}장
+                      사용 가능한 중복 카드(예비/벤치): {duplicateCards.length}장
                     </p>
                     <div>
                       <div className="mb-1 flex justify-between text-[11px] text-slate-400">

@@ -3,7 +3,7 @@ import { TEAM_TACTIC_LABELS } from '../../../constants/tacticsConfig.js';
 import { getPeriodLabel } from './LiveControlBar.jsx';
 
 /**
- * 한 팀의 득점/퇴장 이벤트를 선수별로 묶어 목록으로 만듭니다. (득점 분과 어시스트 포함)
+ * 한 팀의 득점/퇴장 이벤트를 선수별로 묶어 목록으로 만듦. (득점 분과 어시스트 포함)
  * @param {Object[]} events 타임라인 이벤트
  * @param {'HOME'|'AWAY'} team
  * @returns {{goals:Array<{name:string, shots:Array<{minute:number, assist:string|null}>}>, reds:Array<{name:string, minute:number}>}}
@@ -69,8 +69,8 @@ function TeamBlock({ team, summary }) {
 }
 
 /**
- * 실시간 전광판: 양 팀 엠블럼/이름, 현재 스코어, 경기 시간, 실시간 득점자 목록(득점 분 + 도움)과 퇴장자를 표시합니다.
- * 득점/퇴장 이벤트가 타임라인에 기록되는 즉시 갱신됩니다.
+ * 실시간 전광판: 양 팀 엠블럼/이름, 현재 스코어, 경기 시간, 실시간 득점자 목록(득점 분 + 도움)과 퇴장자를 표시함.
+ * 득점/퇴장 이벤트가 타임라인에 기록되는 즉시 갱신됨.
  * @returns {JSX.Element|null}
  */
 export default function ScoreHeader() {
@@ -78,6 +78,7 @@ export default function ScoreHeader() {
   const awayTeam = useLiveMatchStore((s) => s.awayTeam);
   const minute = useLiveMatchStore((s) => s.minute);
   const matchPhase = useLiveMatchStore((s) => s.matchPhase);
+  const shootout = useLiveMatchStore((s) => s.shootout);
   const events = useLiveMatchStore((s) => s.timelineEvents);
   const context = useLiveMatchStore((s) => s.context);
   if (!homeTeam || !awayTeam) return null;
@@ -94,7 +95,12 @@ export default function ScoreHeader() {
           <p className="text-4xl font-black tracking-tight text-white" data-testid="score-text">
             {homeTeam.score} <span className="text-slate-600">:</span> {awayTeam.score}
           </p>
-          <p className="mt-1 rounded-full bg-slate-800 px-3 py-0.5 text-[11px] font-semibold text-slate-300">{getPeriodLabel(minute, matchPhase)}</p>
+          {shootout && (
+            <p className="text-xs font-bold text-amber-300" data-testid="shootout-text">
+              승부차기 {shootout.home} : {shootout.away}
+            </p>
+          )}
+          <p className="mt-1 rounded-full bg-slate-800 px-3 py-0.5 text-[11px] font-semibold text-slate-300">{getPeriodLabel(minute, matchPhase, shootout)}</p>
         </div>
         <TeamBlock team={awayTeam} summary={awaySummary} />
       </div>

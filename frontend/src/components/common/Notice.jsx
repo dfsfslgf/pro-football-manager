@@ -1,5 +1,5 @@
 /**
- * 성공/실패/안내 메시지 배너. message 가 없으면 아무것도 그리지 않습니다.
+ * 성공/실패/안내 메시지 배너. message 가 없으면 아무것도 그리지 않음.
  * @param {Object} props
  * @param {{type:'success'|'error'|'info', text:string}|null} props.notice
  * @param {string} [props.className]

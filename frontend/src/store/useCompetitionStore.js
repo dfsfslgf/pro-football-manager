@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { fetchCompetition, fetchCompetitions, fetchNextMatch, startCompetition } from '../api/gameApi.js';
 import { errorMessage } from '../api/client.js';
 import { WORLD_CUP_48_NATIONS } from '../constants/nationalSquads.js';
+import { flagFor } from '../constants/nationFlags.js';
 
 const NATION_META_BY_CODE = Object.fromEntries(WORLD_CUP_48_NATIONS.map((n) => [n.code, n]));
 
@@ -38,7 +39,7 @@ export const useCompetitionStore = create((set, get) => ({
           patch.selectedWorldCupNation = {
             code: savedCode,
             name: teamInState.name,
-            emblem: teamInState.emblem || '🌍',
+            emblem: flagFor(savedCode),
             ovr: teamInState.strength || 80,
           };
         }

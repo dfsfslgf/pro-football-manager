@@ -438,7 +438,7 @@ function makeAiPlayer(rng, id, rawMainPosition, rawRoleCode, strength, namePool,
   };
 }
 
-export function buildOpponent({ seed, name, strength = 75, formation = null, tactics = null }) {
+export function buildOpponent({ seed, name, strength = 75, formation = null, tactics = null, emblem = null }) {
   const rng = createRng(seed || `${name}-${strength}`);
   const formCodes = Object.keys(FORMATIONS);
   const chosenFormation = formation && FORMATIONS[formation] ? formation : rng.pick(formCodes);
@@ -481,9 +481,10 @@ export function buildOpponent({ seed, name, strength = 75, formation = null, tac
     offsideTrap: rng.pick(['OFF', 'ON']),
   };
 
+  const randomEmblem = rng.pick(EMBLEMS);
   return {
     name,
-    emblem: rng.pick(EMBLEMS),
+    emblem: emblem || randomEmblem,
     strength,
     formation: chosenFormation,
     tactics: { ...defaultTactics, ...(tactics || {}) },

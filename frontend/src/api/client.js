@@ -2,11 +2,11 @@ import axios from 'axios';
 
 const TOKEN_KEY = 'pfm.token';
 
-/** 인증이 만료(401)되었을 때 호출되는 핸들러. useAuthStore 가 등록합니다. */
+/** 인증이 만료(401)되었을 때 호출되는 핸들러. useAuthStore 가 등록함. */
 let unauthorizedHandler = null;
 
 /**
- * 저장된 인증 토큰을 읽습니다.
+ * 저장된 인증 토큰을 읽음.
  * @returns {string|null}
  */
 export function getToken() {
@@ -18,7 +18,7 @@ export function getToken() {
 }
 
 /**
- * 인증 토큰을 저장하거나(null 이면) 삭제합니다.
+ * 인증 토큰을 저장하거나(null 이면) 삭제함.
  * @param {string|null} token
  * @returns {void}
  */
@@ -27,12 +27,12 @@ export function setToken(token) {
     if (token) window.localStorage.setItem(TOKEN_KEY, token);
     else window.localStorage.removeItem(TOKEN_KEY);
   } catch {
-    /* 저장소를 사용할 수 없는 환경에서는 메모리 상태만 유지됩니다. */
+    /* 저장소를 사용할 수 없는 환경에서는 메모리 상태만 유지됨. */
   }
 }
 
 /**
- * 401 응답 시 실행할 콜백을 등록합니다.
+ * 401 응답 시 실행할 콜백을 등록함.
  * @param {(() => void)|null} handler
  * @returns {void}
  */
@@ -62,7 +62,7 @@ client.interceptors.response.use(
 );
 
 /**
- * 서버 에러 응답에서 사용자에게 보여줄 메시지를 추출합니다.
+ * 서버 에러 응답에서 사용자에게 보여줄 메시지를 추출함.
  * @param {unknown} err axios 에러
  * @param {string} [fallback] 메시지가 없을 때 대체 문구
  * @returns {string}
@@ -75,7 +75,7 @@ export function errorMessage(err, fallback = '요청을 처리하지 못했습�
 }
 
 /**
- * 요청을 보내고 `{ success, data }` 응답에서 data 만 반환합니다.
+ * 요청을 보내고 `{ success, data }` 응답에서 data 만 반환함.
  * @param {'get'|'post'|'put'|'delete'} method
  * @param {string} url
  * @param {Object} [options] { data, params }

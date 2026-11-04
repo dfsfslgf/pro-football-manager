@@ -13,6 +13,7 @@ import {
   WORLD_CUP_NATIONS_META,
 } from '../constants/competitionRules.js';
 import { NotFoundError, ValidationError } from '../constants/errorCodes.js';
+import { flagFor } from '../constants/nationFlags.js';
 import ClubRepository from '../repositories/ClubRepository.js';
 import { computeOverall } from '../utils/playerMath.js';
 import { createRng } from '../utils/seededRandom.js';
@@ -252,6 +253,7 @@ function knockoutNext(userId, state, prefix, title) {
       name: opp.name,
       strength: opp.strength,
       isNationalTeam: prefix === 'WK',
+      emblem: prefix === 'WK' ? flagFor(opp.code || oppId) : undefined,
     },
   };
 }
@@ -264,7 +266,7 @@ function knockoutSummary(userMatch, roundName) {
   };
 }
 
-function playKnockoutRound(state, userGoals, oppGoals, userStrength, rng) {
+function playKnockoutRound(state, userGoals, oppGoals, userStrength, rng, penaltyShootout = null) {
   const userIdKey = state.userTeamId || 'USER';
   const round = state.rounds[state.roundIndex];
   const winners = [];
@@ -281,6 +283,11 @@ function playKnockoutRound(state, userGoals, oppGoals, userStrength, rng) {
         m.winner = m.a;
       } else if (m.gb > m.ga) {
         m.winner = m.b;
+      } else if (penaltyShootout) {
+        // 라이브 경기에서 실제로 진행된 승부차기 결과(home = 유저)를 그대로 반영
+        userWon = penaltyShootout.home > penaltyShootout.away;
+        m.winner = userWon ? userIdKey : oppId;
+        m.penaltyNote = `승부차기 ${penaltyShootout.home}:${penaltyShootout.away} ${userWon ? '승' : '패'}`;
       } else {
         const oppStrength = state.teams[oppId].strength;
         const winChance = clamp(0.5 + (userStrength - oppStrength) * 0.02, 0.25, 0.75);
@@ -589,10 +596,10 @@ const cupHandler = {
     return knockoutNext(userId, state, 'C', '챔피언스 컵');
   },
 
-  apply({ userId, state, userGoals, oppGoals, userStrength }) {
+  apply({ userId, state, userGoals, oppGoals, userStrength, penaltyShootout }) {
     const rng = createRng(`cup-sim:${userId}:${state.roundIndex}:${userGoals}-${oppGoals}`);
     const before = state.roundIndex;
-    const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng);
+    const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng, penaltyShootout);
     const summary = {
       type: 'CUP',
       tierLevel: state.tierLevel || 1,
@@ -744,6 +751,17 @@ function buildWorldCupRoundOf32Matches(groupStandings) {
   };
 }
 
+/** 이전에 저장된 월드컵 상태의 임의 엠블럼을 국가별 국기 이모지로 보정함 */
+function applyWorldCupFlags(state) {
+  for (const [id, team] of Object.entries(state?.teams || {})) {
+    team.emblem = flagFor(team.code || id);
+  }
+  for (const [id, row] of Object.entries(state?.table || {})) {
+    row.emblem = flagFor(row.code || id);
+  }
+  return state;
+}
+
 const worldCupHandler = {
   create({ userId, prev, selectedNationCode }) {
     const tierLevel = prev?.champion && prev?.champion === prev?.userTeamId ? (prev.tierLevel || 1) + 1 : prev?.tierLevel || 1;
@@ -758,7 +776,7 @@ const worldCupHandler = {
         id: codeKey,
         code: codeKey,
         name: meta.name,
-        emblem: emblemFor(meta.name),
+        emblem: flagFor(codeKey),
         confed: meta.confed,
         pot: meta.pot,
         hostGroup: meta.hostGroup || null,
@@ -804,18 +822,25 @@ const worldCupHandler = {
     return {
       ref: `WG:${state.matchday}`,
       label: `2026 월드컵 ${uGroup}조${tierNote} 조별리그 ${state.matchday}차전 (${state.teams[userIdKey]?.name || '대표팀'} vs ${opp.name})`,
-      opponentSpec: { seed: `wg:${userId}:${state.matchday}:${opp.id}`, name: opp.name, strength: opp.strength, isNationalTeam: true },
+      opponentSpec: {
+        seed: `wg:${userId}:${state.matchday}:${opp.id}`,
+        name: opp.name,
+        strength: opp.strength,
+        isNationalTeam: true,
+        emblem: flagFor(opp.code || opp.id),
+      },
     };
   },
 
-  apply({ userId, state, userGoals, oppGoals, userStrength }) {
+  apply({ userId, state, userGoals, oppGoals, userStrength, penaltyShootout }) {
+    applyWorldCupFlags(state);
     const userIdKey = state.userTeamId || 'KOR';
     state.nationLocked = true;
 
     if (state.phase === 'KNOCKOUT') {
       const rng = createRng(`wk-sim:${userId}:${state.roundIndex}:${userGoals}-${oppGoals}`);
       const before = state.roundIndex;
-      const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng);
+      const r = playKnockoutRound(state, userGoals, oppGoals, userStrength, rng, penaltyShootout);
       const summary = {
         type: 'WORLD_CUP',
         phase: 'KNOCKOUT',
@@ -1094,6 +1119,7 @@ export default class CompetitionService {
       view.standings = rankRows(Object.values(row.state.table));
     }
     if (mode === 'WORLD_CUP') {
+      applyWorldCupFlags(row.state);
       const rawGroups = row.state.groups || {};
       const validGroupKeys = Object.keys(rawGroups).filter((g) => Array.isArray(rawGroups[g]));
       view.groupStandings = Object.fromEntries(
@@ -1228,7 +1254,7 @@ export default class CompetitionService {
     return await CompetitionService.nextMatch(userId, mode, stageId, nationCode);
   }
 
-  static async applyResult(conn, userId, context, scoreHome, scoreAway) {
+  static async applyResult(conn, userId, context, scoreHome, scoreAway, penaltyShootout = null) {
     const { mode } = context;
     const handler = handlerFor(mode);
     const row = await ClubRepository.getCompetition(conn, userId, mode, true);
@@ -1247,6 +1273,7 @@ export default class CompetitionService {
       userGoals: scoreHome,
       oppGoals: scoreAway,
       userStrength,
+      penaltyShootout,
       context,
     });
     const nextStatus = result.finished ? 'FINISHED' : 'ACTIVE';

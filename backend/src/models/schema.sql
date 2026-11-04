@@ -1,5 +1,5 @@
 -- Pro Football Manager : MySQL 8.0+ DDL (InnoDB / utf8mb4)
--- 이전 버전 스키마로 만든 개발용 DB 는 DROP DATABASE 후 다시 생성하는 것을 권장합니다. (npm run db:init)
+-- 이전 버전 스키마로 만든 개발용 DB 는 DROP DATABASE 후 다시 생성하는 것을 권장함. (npm run db:init)
 
 CREATE TABLE IF NOT EXISTS `users` (
   `id`            BIGINT NOT NULL AUTO_INCREMENT,
@@ -48,10 +48,12 @@ CREATE TABLE IF NOT EXISTS `user_players` (
   `exp`             INT UNSIGNED NOT NULL DEFAULT 0,
   `stamina`         INT UNSIGNED NOT NULL DEFAULT 100,
   `is_starter`      BOOLEAN NOT NULL DEFAULT FALSE,
-  `lineup_slot`     TINYINT UNSIGNED NULL COMMENT '라인업 슬롯: 0~10 선발(포메이션 slotIndex), 11~17 벤치, NULL 후보',
+  `lineup_slot`     TINYINT UNSIGNED NULL COMMENT '라인업 슬롯: 0~10 선발(포메이션 slotIndex), 11~21 벤치, NULL 후보',
   `instruction`     VARCHAR(20) NULL COMMENT '개인 지침',
-  `secondary_role`  VARCHAR(4) NULL COMMENT '포지션 숙련도 훈련으로 얻은 보조 세부 포지션',
+  `secondary_role`  VARCHAR(64) NULL COMMENT '포지션 숙련도 훈련으로 얻은 보조 세부 포지션(쉼표 구분)',
   `bonus_gauge`     INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '강화 보너스 게이지(0~100)',
+  `max_level`       INT NOT NULL DEFAULT 20 COMMENT '한계돌파로 확장되는 최대 레벨(20~40)',
+  `suspended_matches` INT NOT NULL DEFAULT 0 COMMENT '퇴장 징계 잔여 출장 정지 경기 수',
   `matches_played`  INT UNSIGNED NOT NULL DEFAULT 0,
   `goals`           INT UNSIGNED NOT NULL DEFAULT 0,
   `assists`         INT UNSIGNED NOT NULL DEFAULT 0,

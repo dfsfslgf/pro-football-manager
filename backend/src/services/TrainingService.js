@@ -26,6 +26,11 @@ async function ensureTrainingColumns(conn) {
   } catch {
     // ignore
   }
+  try {
+    await conn.query('ALTER TABLE user_players ADD COLUMN suspended_matches INT NOT NULL DEFAULT 0');
+  } catch {
+    // ignore
+  }
   schemaChecked = true;
 }
 
@@ -77,19 +82,20 @@ export default class TrainingService {
 
         // ClubRepository.getFullPlayers를 사용하여 DB 컬럼명 차이와 무관하게 동일 마스터(playerId) 또는 동명 중복 선수 조회
         const allOwned = await ClubRepository.getFullPlayers(conn, userId);
+        // 선발(슬롯 0~10)이 아닌 동일 선수 카드만 재료로 사용 가능. 예비 > 벤치 순으로, 레벨이 낮은 카드부터 소모
+        const isStarterCard = (p) => p.isStarter || (p.lineupSlot !== null && p.lineupSlot < 11);
         const dupCandidates = allOwned
           .filter(
             (p) =>
               p.userPlayerId !== Number(userPlayerId) &&
               (p.playerId === player.playerId || p.name === player.name) &&
-              !p.isStarter &&
-              p.lineupSlot === null
+              !isStarterCard(p)
           )
-          .sort((a, b) => a.level - b.level);
+          .sort((a, b) => (a.lineupSlot === null ? 0 : 1) - (b.lineupSlot === null ? 0 : 1) || a.level - b.level);
 
         if (dupCandidates.length === 0) {
           throw new ValidationError(
-            `현재 최대 레벨(Lv.${currentMaxLevel})입니다. 한계돌파(+5레벨 확장)를 하려면 동일한 중복 선수(선발/후보에 배치되지 않은 예비 상태)가 필요합니다.`
+            `현재 최대 레벨(Lv.${currentMaxLevel})입니다. 한계돌파(+5레벨 확장)를 하려면 선발 명단에 없는 동일한 중복 선수 카드가 필요합니다.`
           );
         }
 

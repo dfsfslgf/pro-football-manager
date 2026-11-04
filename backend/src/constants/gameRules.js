@@ -13,6 +13,7 @@ export const GAME_RULES = Object.freeze({
   }),
 
   MATCH_MINUTES: 90,
+  EXTRA_TIME_MATCH_MINUTES: 120,
   SQUAD_SIZE: 22,
   MIN_SQUAD_SIZE: 11,
   BENCH_SIZE: 11,

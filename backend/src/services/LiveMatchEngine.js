@@ -14,6 +14,9 @@ const ALLOWED_EVENT_TYPES = new Set(['GOAL', 'YELLOW_CARD', 'RED_CARD', 'SUBSTIT
 const TEAMS = new Set(['HOME', 'AWAY']);
 const MAX_EVENTS = 300;
 const MAX_GOALS = 20;
+const MAX_SHOOTOUT_GOALS = 30;
+// 단판 녹아웃 라운드(챔피언스컵 C:*, 월드컵 토너먼트 WK:*)는 무승부 시 연장전/승부차기로 승자를 가림
+const KNOCKOUT_REF_PATTERN = /^(C|WK):/;
 
 const EXTENDED_SPONSORS = {
   LOCAL_SHOP: { label: '동네 상점 연합', matchFee: 600, winBonus: 400 },
@@ -151,6 +154,16 @@ export default class LiveMatchEngine {
     return normalized;
   }
 
+  /**
+   * 연장전까지 동점일 때만 의미가 있는 승부차기 결과({ home, away })를 검증함. 유효하지 않으면 null.
+   */
+  static validatePenaltyShootout(shootout, scoreHome, scoreAway) {
+    if (scoreHome !== scoreAway || !shootout || typeof shootout !== 'object') return null;
+    const { home, away } = shootout;
+    if (!isIntInRange(home, MAX_SHOOTOUT_GOALS) || !isIntInRange(away, MAX_SHOOTOUT_GOALS) || home === away) return null;
+    return { home, away };
+  }
+
   static validateResult(payload, baseline) {
     const { scoreHome, scoreAway, homeStats, awayStats, timelineEvents, playerStamina } = payload || {};
     if (!isIntInRange(scoreHome, MAX_GOALS) || !isIntInRange(scoreAway, MAX_GOALS)) {
@@ -196,7 +209,7 @@ export default class LiveMatchEngine {
     const events = timelineEvents
       .filter((e) => e && ALLOWED_EVENT_TYPES.has(e.type) && TEAMS.has(e.team))
       .map((e) => ({
-        minute: Math.max(1, Math.min(95, Number(e.minute) || 1)),
+        minute: Math.max(1, Math.min(GAME_RULES.EXTRA_TIME_MATCH_MINUTES + 5, Number(e.minute) || 1)),
         type: e.type,
         team: e.team,
         primaryPlayerId: e.primaryPlayerId ?? null,
@@ -220,7 +233,7 @@ export default class LiveMatchEngine {
       entries.push({
         userPlayerId: entry.userPlayerId,
         stamina: Math.max(GAME_RULES.MIN_STAMINA, Math.min(100, Number(entry.stamina) || 70)),
-        minutesPlayed: Math.max(1, Math.min(GAME_RULES.MATCH_MINUTES, Number(entry.minutesPlayed) || 1)),
+        minutesPlayed: Math.max(1, Math.min(GAME_RULES.EXTRA_TIME_MATCH_MINUTES, Number(entry.minutesPlayed) || 1)),
         enteredAsSub: Boolean(entry.enteredAsSub),
         saves: Math.max(0, Math.min(60, Number(entry.saves) || 0)),
         shots: sh,
@@ -260,6 +273,7 @@ export default class LiveMatchEngine {
     return {
       scoreHome,
       scoreAway,
+      penaltyShootout: LiveMatchEngine.validatePenaltyShootout(payload.penaltyShootout, scoreHome, scoreAway),
       homeStats: {
         ...home,
         tactics,
@@ -352,12 +366,16 @@ export default class LiveMatchEngine {
     }
     const { context } = session;
     const validated = LiveMatchEngine.validateResult(payload, context.baseline);
-    const outcome =
-      validated.scoreHome > validated.scoreAway
-        ? 'WIN'
-        : validated.scoreHome === validated.scoreAway
-        ? 'DRAW'
-        : 'LOSE';
+    const isKnockout = KNOCKOUT_REF_PATTERN.test(String(context.ref || ''));
+    const shootout = isKnockout ? validated.penaltyShootout : null;
+    let outcome;
+    if (validated.scoreHome !== validated.scoreAway) {
+      outcome = validated.scoreHome > validated.scoreAway ? 'WIN' : 'LOSE';
+    } else if (shootout) {
+      outcome = shootout.home > shootout.away ? 'WIN' : 'LOSE';
+    } else {
+      outcome = 'DRAW';
+    }
     LiveMatchEngine.sessions.delete(sessionId);
 
     const conn = await pool.getConnection();
@@ -379,7 +397,8 @@ export default class LiveMatchEngine {
         userId,
         context,
         validated.scoreHome,
-        validated.scoreAway
+        validated.scoreAway,
+        shootout
       );
 
       const isChampion = Boolean(competition.summary?.champion || competition.summary?.seasonEnd?.champion);
@@ -446,6 +465,7 @@ export default class LiveMatchEngine {
       const report = {
         outcome,
         score: { home: validated.scoreHome, away: validated.scoreAway },
+        penaltyShootout: shootout,
         homeStats: validated.homeStats,
         awayStats: validated.awayStats,
         opponentName: context.opponentName,

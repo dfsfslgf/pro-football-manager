@@ -8,6 +8,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pool from '../config/database.js';
 import { REAL_PLAYER_MASTER_CATALOG, buildBaseStats } from '../models/seedData.js';
 
@@ -595,8 +596,10 @@ export async function runPlayerCrawler() {
     byTeam[teamKey].push(p);
   }
 
-  const outFlatPath = path.resolve(process.cwd(), 'real_players_seed.json');
-  const outTeamPath = path.resolve(process.cwd(), 'real_players_by_team.json');
+  // 서버 시작 시 시드(ensurePlayerMasterSeed)가 읽는 위치와 동일하도록 backend 루트에 저장
+  const backendRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const outFlatPath = path.resolve(backendRoot, 'real_players_seed.json');
+  const outTeamPath = path.resolve(backendRoot, 'real_players_by_team.json');
   await fs.writeFile(outFlatPath, JSON.stringify(deduplicated, null, 2), 'utf-8');
   await fs.writeFile(outTeamPath, JSON.stringify(byTeam, null, 2), 'utf-8');
 

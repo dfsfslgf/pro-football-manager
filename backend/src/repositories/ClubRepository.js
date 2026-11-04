@@ -59,27 +59,28 @@ export default class ClubRepository {
     const executor = conn || pool;
     const [rows] = await executor.query(Q.SELECT_FULL_PLAYERS, [userId]);
 
+    // 컬럼이 서로 다른 시점에 지연 생성되므로, 하나가 없더라도 다른 컬럼 값은 유지하도록 각각 조회함
     const extraMap = new Map();
-    try {
-      const [extraRows] = await executor.query(
-        'SELECT id, suspended_matches AS suspendedMatches, max_level AS maxLevel FROM user_players WHERE user_id = ?',
-        [userId]
-      );
-      for (const er of extraRows) {
-        extraMap.set(Number(er.id), {
-          suspendedMatches: Number(er.suspendedMatches || 0),
-          maxLevel: Number(er.maxLevel || 20),
-        });
+    const loadExtra = async (column, key, fallback) => {
+      try {
+        const [extraRows] = await executor.query(`SELECT id, ${column} AS value FROM user_players WHERE user_id = ?`, [userId]);
+        for (const er of extraRows) {
+          const uid = Number(er.id);
+          extraMap.set(uid, { ...(extraMap.get(uid) || {}), [key]: Number(er.value ?? fallback) });
+        }
+      } catch {
+        // 컬럼 미생성 시 기본값 사용
       }
-    } catch {
-      // 컬럼 미생성 시 기본값 사용
-    }
+    };
+    await loadExtra('suspended_matches', 'suspendedMatches', 0);
+    await loadExtra('max_level', 'maxLevel', 20);
 
     return rows.map((r) => {
       const uid = Number(r.userPlayerId);
       const goals = Number(r.goals || 0);
       const rawSot = Number(r.shotsOnTarget || 0);
-      const extra = extraMap.get(uid) || { suspendedMatches: 0, maxLevel: 20 };
+      const extra = { suspendedMatches: 0, maxLevel: 20, ...(extraMap.get(uid) || {}) };
+      extra.maxLevel = extra.maxLevel || 20;
 
       return {
         userPlayerId: uid,

@@ -11,6 +11,7 @@ import Panel from '../components/common/Panel.jsx';
 import Notice from '../components/common/Notice.jsx';
 import TacticsWorkspace from '../components/domain/squad/TacticsWorkspace.jsx';
 import { MODE_META } from '../constants/gameConfig.js';
+import { flagFor } from '../constants/nationFlags.js';
 
 export default function PreMatchLobbyPage() {
   const user = useAuthStore((s) => s.user);
@@ -25,7 +26,7 @@ export default function PreMatchLobbyPage() {
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const wcNation = params?.nation || selectedWorldCupNation || { code: 'KOR', name: '대한민국', emblem: '🐯' };
+  const wcNation = params?.nation || selectedWorldCupNation || { code: 'KOR', name: '대한민국', emblem: flagFor('KOR') };
   const resolvedNext = pending?.next?.opponent ? pending.next : pending?.opponent ? pending : null;
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export default function PreMatchLobbyPage() {
   const displayHomeName =
     mode === 'WORLD_CUP' ? `${wcNation?.name || '대한민국'} 국가대표팀` : club?.name || '내 구단';
   const displayHomeEmblem =
-    mode === 'WORLD_CUP' ? wcNation?.emblem || '🐯' : club?.emblemIcon || '🛡️';
+    mode === 'WORLD_CUP' ? wcNation?.emblem || flagFor(wcNation?.code) : club?.emblemIcon || '🛡️';
 
   const handleAutoBench = () => {
     const res = autoFillBench();

@@ -625,6 +625,7 @@ function buildFinishPayload(state) {
     sessionId: state.sessionId,
     scoreHome: homeTeam.score,
     scoreAway: awayTeam.score,
+    penaltyShootout: state.shootout ? { home: state.shootout.home, away: state.shootout.away } : null,
     homeStats: toStats(homeTeam, homePossession, homeRedsCount),
     awayStats: toStats(awayTeam, 100 - homePossession, awayRedsCount),
     timelineEvents: cleanEvents,
@@ -639,7 +640,7 @@ function buildFinishPayload(state) {
         return {
           userPlayerId: p.userPlayerId,
           stamina: Math.max(5, Math.min(100, Math.round(p.currentStamina))),
-          minutesPlayed: Math.max(1, Math.min(90, p.minutesPlayed || 1)),
+          minutesPlayed: Math.max(1, Math.min(MATCH_RULES.MATCH_MINUTES + MATCH_RULES.EXTRA_TIME_HALF_MINUTES * 2, p.minutesPlayed || 1)),
           enteredAsSub: Boolean(p.enteredAsSub),
           saves: p.saves || 0,
           shots: validShots,
@@ -648,6 +649,82 @@ function buildFinishPayload(state) {
         };
       }),
   };
+}
+
+const KNOCKOUT_REF_PATTERN = /^(C|WK):/;
+
+/**
+ * 챔피언스컵(C:*)·월드컵 토너먼트(WK:*)처럼 무승부로 끝날 수 없는 단판 녹아웃 경기 여부
+ */
+export function isKnockoutContext(context) {
+  return KNOCKOUT_REF_PATTERN.test(String(context?.ref || ''));
+}
+
+function playerStatsOf(p) {
+  return p?.effectiveStats || p?.baseStats || {};
+}
+
+function buildPenaltyTakerOrder(team) {
+  const alive = aliveOf(team);
+  const outfield = alive
+    .filter((p) => p.slotRoleCode !== 'GK')
+    .sort((a, b) => (playerStatsOf(b).shooting || 70) - (playerStatsOf(a).shooting || 70));
+  return [...outfield, ...alive.filter((p) => p.slotRoleCode === 'GK')];
+}
+
+/**
+ * 연장전까지 동점일 때 승부차기를 즉시 시뮬레이션함. (5번씩 선축 후 서든데스, 승패가 확정되면 조기 종료)
+ * @returns {{home:number, away:number, logs:Object[]}}
+ */
+function simulatePenaltyShootout(home, away, minute) {
+  const sides = {
+    HOME: { team: home, takers: buildPenaltyTakerOrder(home), taken: 0, score: 0 },
+    AWAY: { team: away, takers: buildPenaltyTakerOrder(away), taken: 0, score: 0 },
+  };
+  const logs = [makeInfoEvent(minute, `🥅 연장전까지 ${home.score} : ${away.score} 무승부 · 승부차기로 승자를 가립니다.`)];
+
+  const kick = (side, foeSide) => {
+    const me = sides[side];
+    const foe = sides[foeSide];
+    const shooter = me.takers[me.taken % Math.max(1, me.takers.length)];
+    const keeper = aliveOf(foe.team).find((p) => p.slotRoleCode === 'GK');
+    const shooting = playerStatsOf(shooter).shooting || 70;
+    const reflexes = playerStatsOf(keeper).gkReflexes || 60;
+    const chance = Math.max(0.55, Math.min(0.92, 0.76 + (shooting - 75) * 0.004 - (reflexes - 75) * 0.003));
+    const scored = Math.random() < chance;
+    me.taken += 1;
+    if (scored) me.score += 1;
+    logs.push(
+      makeInfoEvent(
+        minute,
+        `🥅 [승부차기 ${me.taken}번째] ${me.team.name} ${getSafeName(shooter)} ${scored ? '⚽ 성공' : '❌ 실패'} (${sides.HOME.score} : ${sides.AWAY.score})`
+      )
+    );
+  };
+
+  const isDecided = () => {
+    const homeLeft = Math.max(0, 5 - sides.HOME.taken);
+    const awayLeft = Math.max(0, 5 - sides.AWAY.taken);
+    return sides.HOME.score > sides.AWAY.score + awayLeft || sides.AWAY.score > sides.HOME.score + homeLeft;
+  };
+
+  regular: for (let round = 0; round < 5; round++) {
+    for (const [side, foe] of [['HOME', 'AWAY'], ['AWAY', 'HOME']]) {
+      kick(side, foe);
+      if (isDecided()) break regular;
+    }
+  }
+  let suddenDeathRounds = 0;
+  while (sides.HOME.score === sides.AWAY.score && suddenDeathRounds < 25) {
+    kick('HOME', 'AWAY');
+    kick('AWAY', 'HOME');
+    suddenDeathRounds += 1;
+  }
+  if (sides.HOME.score === sides.AWAY.score) sides.HOME.score += 1;
+
+  const winner = sides.HOME.score > sides.AWAY.score ? home : away;
+  logs.push(makeInfoEvent(minute, `🏆 승부차기 결과 ${sides.HOME.score} : ${sides.AWAY.score} · ${winner.name} 승리`));
+  return { home: sides.HOME.score, away: sides.AWAY.score, logs };
 }
 
 let tickTimer = null;
@@ -674,6 +751,9 @@ const initialState = {
   addedTime: 0,
   firstHalfAdded: 2,
   secondHalfAdded: 3,
+  etFirstAdded: 1,
+  etSecondAdded: 1,
+  shootout: null,
   inStoppageTime: false,
   stoppageElapsed: 0,
   isPaused: false,
@@ -1134,6 +1214,8 @@ export const useLiveMatchStore = create((set, get) => ({
       minute: startMinute,
       firstHalfAdded,
       secondHalfAdded,
+      etFirstAdded: 1 + Math.floor(Math.random() * 2),
+      etSecondAdded: 1 + Math.floor(Math.random() * 2),
       addedTime: firstHalfAdded,
       inStoppageTime: false,
       stoppageElapsed: 0,
@@ -1182,18 +1264,24 @@ export const useLiveMatchStore = create((set, get) => ({
   advanceMinute: () => {
     const state = get();
     if (state.status !== 'live' || state.isPaused) return;
-    if (state.matchPhase !== 'FIRST_HALF' && state.matchPhase !== 'SECOND_HALF') return;
+    const phase = state.matchPhase;
+    const isExtraTime = phase === 'EXTRA_TIME_1' || phase === 'EXTRA_TIME_2';
+    if (phase !== 'FIRST_HALF' && phase !== 'SECOND_HALF' && !isExtraTime) return;
 
     const home = cloneTeam(state.homeTeam);
     const away = cloneTeam(state.awayTeam);
     const logs = [...state.timelineEvents];
     const seq = state.actionSeq + 1;
 
+    const regulationEnd = MATCH_RULES.MATCH_MINUTES;
+    const extraFirstEnd = regulationEnd + MATCH_RULES.EXTRA_TIME_HALF_MINUTES;
+    const extraSecondEnd = extraFirstEnd + MATCH_RULES.EXTRA_TIME_HALF_MINUTES;
+
     let nextMinute = state.minute;
     let inStoppage = state.inStoppageTime;
     let stoppageElapsed = state.stoppageElapsed;
 
-    if (state.matchPhase === 'FIRST_HALF') {
+    if (phase === 'FIRST_HALF') {
       if (state.minute < MATCH_RULES.HALF_TIME_MINUTE) {
         nextMinute = state.minute + 1;
         if (nextMinute === MATCH_RULES.HALF_TIME_MINUTE) {
@@ -1204,13 +1292,26 @@ export const useLiveMatchStore = create((set, get) => ({
       } else {
         stoppageElapsed += 1;
       }
-    } else if (state.matchPhase === 'SECOND_HALF') {
-      if (state.minute < MATCH_RULES.MATCH_MINUTES) {
+    } else if (phase === 'SECOND_HALF') {
+      if (state.minute < regulationEnd) {
         nextMinute = state.minute + 1;
-        if (nextMinute === MATCH_RULES.MATCH_MINUTES) {
+        if (nextMinute === regulationEnd) {
           inStoppage = true;
           stoppageElapsed = 0;
           logs.push(makeInfoEvent(90, `⏱️ 후반전 정규시간 종료 · 추가시간 ${state.secondHalfAdded}분이 적용됩니다.`));
+        }
+      } else {
+        stoppageElapsed += 1;
+      }
+    } else {
+      const periodEnd = phase === 'EXTRA_TIME_1' ? extraFirstEnd : extraSecondEnd;
+      const added = phase === 'EXTRA_TIME_1' ? state.etFirstAdded : state.etSecondAdded;
+      if (state.minute < periodEnd) {
+        nextMinute = state.minute + 1;
+        if (nextMinute === periodEnd) {
+          inStoppage = true;
+          stoppageElapsed = 0;
+          logs.push(makeInfoEvent(periodEnd, `⏱️ 연장 ${phase === 'EXTRA_TIME_1' ? '전' : '후'}반 정규시간 종료 · 추가시간 ${added}분이 적용됩니다.`));
         }
       } else {
         stoppageElapsed += 1;
@@ -1230,7 +1331,7 @@ export const useLiveMatchStore = create((set, get) => ({
       currentTickAction: { ...action, seq },
     };
 
-    if (state.matchPhase === 'FIRST_HALF' && inStoppage && stoppageElapsed >= state.firstHalfAdded) {
+    if (phase === 'FIRST_HALF' && inStoppage && stoppageElapsed >= state.firstHalfAdded) {
       const homeRecovery = applyHalfTimeRecovery(home);
       applyHalfTimeRecovery(away);
       const totalTicks = Math.max(1, home.stats.possessionTicks + away.stats.possessionTicks);
@@ -1253,14 +1354,63 @@ export const useLiveMatchStore = create((set, get) => ({
       });
     }
 
-    if (state.matchPhase === 'SECOND_HALF' && inStoppage && stoppageElapsed >= state.secondHalfAdded) {
-      logs.push(makeInfoEvent(90, `🏁 경기 종료 휘슬 (90+${state.secondHalfAdded}') · 최종 스코어 ${home.name} ${home.score} : ${away.score} ${away.name}`));
+    const finishMatchPatch = (endMinute, added) => {
+      logs.push(makeInfoEvent(endMinute, `🏁 경기 종료 휘슬 (${endMinute}+${added}') · 최종 스코어 ${home.name} ${home.score} : ${away.score} ${away.name}`));
       Object.assign(patch, {
         status: 'finished',
         matchPhase: 'FULL_TIME',
         inStoppageTime: false,
         isPaused: true,
       });
+    };
+
+    const startExtraPeriod = (nextPhase, startMinute, label) => {
+      logs.push(makeInfoEvent(startMinute, label));
+      const kickoffPlayer = home.starters.find((p) => !p.isSentOff && p.slotRoleGroup === 'MF') || aliveOf(home)[0];
+      Object.assign(patch, {
+        matchPhase: nextPhase,
+        inStoppageTime: false,
+        stoppageElapsed: 0,
+        currentTickAction: {
+          seq,
+          minute: startMinute,
+          eventType: 'KICKOFF',
+          attackingTeam: nextPhase === 'EXTRA_TIME_1' ? 'HOME' : 'AWAY',
+          ballCarrierId: kickoffPlayer ? kickoffPlayer.id : null,
+          passTargetId: null,
+        },
+      });
+    };
+
+    const needsWinner = isKnockoutContext(state.context);
+    const isTied = home.score === away.score;
+
+    if (phase === 'SECOND_HALF' && inStoppage && stoppageElapsed >= state.secondHalfAdded) {
+      if (needsWinner && isTied) {
+        logs.push(makeInfoEvent(90, `🏁 정규시간 종료 (90+${state.secondHalfAdded}') · ${home.name} ${home.score} : ${away.score} ${away.name} 무승부`));
+        // 연장전에는 교체 카드가 1장 추가됨
+        home.subsLeft += 1;
+        away.subsLeft += 1;
+        startExtraPeriod('EXTRA_TIME_1', regulationEnd, '⚽ 연장 전반 시작 (15분) · 양 팀 교체 카드 1장 추가');
+      } else {
+        finishMatchPatch(regulationEnd, state.secondHalfAdded);
+      }
+    }
+
+    if (phase === 'EXTRA_TIME_1' && inStoppage && stoppageElapsed >= state.etFirstAdded) {
+      logs.push(makeInfoEvent(extraFirstEnd, `🔔 연장 전반 종료 (105+${state.etFirstAdded}') · ${home.name} ${home.score} : ${away.score} ${away.name}`));
+      startExtraPeriod('EXTRA_TIME_2', extraFirstEnd, '⚽ 연장 후반 시작 (15분)');
+    }
+
+    if (phase === 'EXTRA_TIME_2' && inStoppage && stoppageElapsed >= state.etSecondAdded) {
+      if (isTied) {
+        const shootout = simulatePenaltyShootout(home, away, extraSecondEnd);
+        logs.push(...shootout.logs);
+        patch.shootout = { home: shootout.home, away: shootout.away };
+        finishMatchPatch(extraSecondEnd, state.etSecondAdded);
+      } else {
+        finishMatchPatch(extraSecondEnd, state.etSecondAdded);
+      }
     }
 
     patch.timelineEvents = logs;

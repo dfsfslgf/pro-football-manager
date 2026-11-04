@@ -1,5 +1,5 @@
 /**
- * 홈/어웨이 양방향 비교 게이지 바. 홈(좌, 파랑)과 어웨이(우, 빨강)가 마주 보며 채워집니다.
+ * 홈/어웨이 양방향 비교 게이지 바. 홈(좌, 파랑)과 어웨이(우, 빨강)가 마주 보며 채워짐.
  * @param {Object} props
  * @param {string} props.label 지표 이름
  * @param {number} props.homeValue 홈 수치

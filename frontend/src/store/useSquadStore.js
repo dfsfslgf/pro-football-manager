@@ -242,6 +242,14 @@ function buildSquadState(data) {
     }
   }
 
+  // 이전 버전에서 저장된 벤치가 11명 미만이면 예비 선수 중 OVR 상위 선수로 11명까지 채움
+  if (finalBench.length < 11 && finalReserve.length > 0) {
+    const fillers = [...finalReserve].sort((a, b) => (b.overall || 0) - (a.overall || 0)).slice(0, 11 - finalBench.length);
+    const fillerIds = new Set(fillers.map((p) => p.userPlayerId));
+    finalBench = [...finalBench, ...fillers];
+    finalReserve = finalReserve.filter((p) => !fillerIds.has(p.userPlayerId));
+  }
+
   const arranged =
     starterPlayers.length === 11
       ? starterPlayers

@@ -79,7 +79,16 @@ export default class SquadService {
 
     let benchRaw;
     if (savedBench.length > 0) {
+      // 저장된 슬롯 순서를 유지하되, 이전 버전(7명)에서 저장된 벤치처럼 정원 미달이면 남은 선수로 11명까지 채움
       benchRaw = savedBench.slice(0, MAX_BENCH_COUNT);
+      if (benchRaw.length < MAX_BENCH_COUNT) {
+        const savedIds = new Set(benchRaw.map((p) => p.userPlayerId));
+        const fillers = rest
+          .filter((p) => !savedIds.has(p.userPlayerId))
+          .sort((a, b) => b.level - a.level || a.userPlayerId - b.userPlayerId)
+          .slice(0, MAX_BENCH_COUNT - benchRaw.length);
+        benchRaw = [...benchRaw, ...fillers];
+      }
     } else {
       // 최초 생성 시에만 기본 후보 자동 배정
       benchRaw = [...rest].sort(byPositionThenLevel).slice(0, MAX_BENCH_COUNT);

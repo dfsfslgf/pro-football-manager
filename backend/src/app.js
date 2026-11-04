@@ -6,7 +6,7 @@ import pool, { testConnection } from './config/database.js';
 import { ensurePlayerMasterSeed } from './models/seedData.js';
 
 /**
- * Express 앱을 구성합니다.
+ * Express 앱을 구성함.
  * @returns {import('express').Express}
  */
 export function createApp() {
@@ -21,7 +21,7 @@ export function createApp() {
 const app = createApp();
 
 /**
- * DB 연결을 확인하고 선수 마스터 시드를 보장한 뒤 HTTP 서버를 시작합니다.
+ * DB 연결을 확인하고 선수 마스터 시드를 보장한 뒤 HTTP 서버를 시작함.
  * @returns {Promise<void>}
  */
 export async function start() {

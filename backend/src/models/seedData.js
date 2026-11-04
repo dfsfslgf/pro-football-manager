@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { computeOverall } from '../utils/playerMath.js';
 
 const PROFILES = {
@@ -222,11 +224,46 @@ export function generatePlayerMasterRows() {
   }));
 }
 
+const CRAWLED_SEED_PATH = fileURLToPath(new URL('../../real_players_seed.json', import.meta.url));
+const VALID_POSITIONS = new Set(['GK', 'DF', 'MF', 'FW']);
+
 /**
- * player_master 가 비어 있으면 실제 선수 시드를 삽입하고,
- * 기존에 가상 이름(72명)이 이미 들어가 있는 경우에도 ID를 유지한 채 실제 선수 이름과 능력치로 자동 마이그레이션.
- * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor
- * @returns {Promise<number>} 삽입/갱신한 행 수
+ * crawlRealPlayers.js 가 생성한 real_players_seed.json 을 player_master 행 형태로 읽음.
+ * 파일이 없거나 형식이 올바르지 않으면 null 을 반환함.
+ * @returns {Promise<Array<{name:string, main_position:string, preferred_role:string, drop_weight:number, base_stats:Object, tags:string[]}>|null>}
+ */
+async function loadCrawledMasterRows() {
+  let raw;
+  try {
+    raw = await fs.readFile(CRAWLED_SEED_PATH, 'utf-8');
+  } catch {
+    return null;
+  }
+  try {
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const rows = list
+      .filter((p) => p?.name && VALID_POSITIONS.has(p.mainPosition) && p.baseStats && typeof p.baseStats === 'object')
+      .map((p) => ({
+        name: String(p.name),
+        main_position: p.mainPosition,
+        preferred_role: p.preferredRoleCode || p.mainPosition,
+        drop_weight: Number(p.dropWeight) || 100,
+        base_stats: p.baseStats,
+        tags: Array.isArray(p.tags) ? p.tags : [],
+      }));
+    return rows.length > 0 ? rows : null;
+  } catch (err) {
+    console.warn(`[Seed] ${CRAWLED_SEED_PATH} 파싱 실패, 기본 카탈로그를 사용함: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * player_master 가 비어 있으면 시드를 삽입함.
+ * 크롤링 결과(real_players_seed.json)가 있으면 우선 사용하고, 없으면 내장 실제 선수 카탈로그를 사용함.
+ * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} conn
+ * @returns {Promise<number>} 삽입한 행 수
  */
 export async function ensurePlayerMasterSeed(conn) {
   const [rows] = await conn.query('SELECT COUNT(*) AS cnt FROM player_master');
@@ -237,12 +274,14 @@ export async function ensurePlayerMasterSeed(conn) {
     return 0;
   }
 
-  const catalog = buildMasterCatalog();
+  const crawled = await loadCrawledMasterRows();
+  const catalog = crawled || generatePlayerMasterRows();
+  console.log(`[Seed] ${crawled ? '크롤링 결과(real_players_seed.json)' : '내장 카탈로그'} 기반으로 ${catalog.length}명 삽입`);
   let inserted = 0;
   for (const p of catalog) {
     await conn.query(
       'INSERT INTO player_master (name, main_position, preferred_role, drop_weight, base_stats, tags) VALUES (?, ?, ?, ?, ?, ?)',
-      [p.name, p.mainPosition, p.preferredRole, p.dropWeight, JSON.stringify(p.baseStats), JSON.stringify(p.tags)]
+      [p.name, p.main_position, p.preferred_role, p.drop_weight, JSON.stringify(p.base_stats), JSON.stringify(p.tags)]
     );
     inserted++;
   }

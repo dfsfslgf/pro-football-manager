@@ -79,7 +79,7 @@ export default class AuthService {
   }
 
   /**
-   * 시작 선수 18명(선발 11 + 벤치 7)을 지급하고 라인업 슬롯을 배정.
+   * 시작 선수 22명(선발 11 + 벤치 11)을 지급하고 라인업 슬롯을 배정.
    * @param {import('mysql2/promise').PoolConnection} conn
    * @param {number} userId
    * @returns {Promise<void>}

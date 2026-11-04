@@ -1,4 +1,5 @@
 import { computeEffectiveStats } from '../utils/playerStats.js';
+import { flagFor } from './nationFlags.js';
 const RAW_48_TEAMS = [
   {
     code: 'MEX', name: '멕시코', emblem: '🦅', confed: 'CONCACAF', ovr: 82, formation: '4-2-3-1',
@@ -391,7 +392,7 @@ export const WC_2026_NATIONAL_ROSTERS = Object.fromEntries(
       {
         code: team.code,
         name: team.name,
-        emblem: team.emblem,
+        emblem: flagFor(team.code),
         confed: team.confed,
         ovr: team.ovr,
         formation: team.formation,
@@ -407,7 +408,7 @@ export const WC_2026_NATIONAL_ROSTERS = Object.fromEntries(
 export const WORLD_CUP_48_NATIONS = RAW_48_TEAMS.map((t) => ({
   code: t.code,
   name: t.name,
-  emblem: t.emblem,
+  emblem: flagFor(t.code),
   confed: t.confed,
   ovr: t.ovr,
   stars: [

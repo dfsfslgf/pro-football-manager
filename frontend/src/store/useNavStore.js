@@ -8,7 +8,7 @@ export const useNavStore = create((set) => ({
   params: {},
 
   /**
-   * 화면을 이동합니다.
+   * 화면을 이동함.
    * @param {string} page
    * @param {Object} [params] 화면에 전달할 값 (예: { mode })
    * @returns {void}

@@ -6,7 +6,7 @@ import {
   SELECT_PLAYER_STAMINA_BY_IDS,
 } from '../queries/squadQueries.js';
 
-/** 선발 슬롯(0~10) 다음부터 벤치 슬롯이 시작됩니다. (최대 11명 지원) */
+/** 선발 슬롯(0~10) 다음부터 벤치 슬롯이 시작됨. (최대 11명 지원) */
 export const BENCH_SLOT_OFFSET = 11;
 
 /**
