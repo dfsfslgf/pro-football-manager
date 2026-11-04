@@ -15,6 +15,9 @@ import { todayKey } from './QuestTracker.js';
 // 유저별 이적시장 새로고침 카운터 (새로고침할 때마다 완전히 다른 8명이 나오도록 보장)
 const userMarketRefreshMap = new Map();
 
+// 유저별 이번 매물 구간에서 이미 영입한 listingKey (새로고침하면 매물과 함께 초기화)
+const userMarketPurchases = new Map();
+
 function generateListings(userId, date, masters, refreshCycle = 0) {
   const rng = createRng(`market:v2:${userId}:${date}:cycle_${refreshCycle}`);
   const shuffled = rng.shuffle([...masters]);
@@ -177,22 +180,19 @@ export default class ClubService {
   static async getMarket(userId) {
     const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
-    const purchased = new Set(await ClubRepository.getPurchases(null, userId, date));
     const prevCycle = userMarketRefreshMap.get(userId) ?? -1;
     const nextCycle = prevCycle + 1;
     userMarketRefreshMap.set(userId, nextCycle);
 
+    // 영입한 매물은 새로고침 전까지 다시 영입할 수 없음 (이미 보유한 선수라도 새 매물이면 영입 가능)
+    userMarketPurchases.set(userId, new Set());
     return {
       date,
-      listings: generateListings(userId, date, masters, nextCycle).map((l) => ({
-        ...l,
-        purchased: purchased.has(l.listingKey),
-      })),
+      listings: generateListings(userId, date, masters, nextCycle).map((l) => ({ ...l, purchased: false })),
     };
   }
 
   static async buyListing(userId, listingKey) {
-    const date = todayKey();
     const masters = await ClubRepository.getAllMasters(null);
     let listing = null;
 
@@ -218,21 +218,29 @@ export default class ClubService {
 
     if (!listing) throw new NotFoundError('오늘 이적 시장에 없는 매물입니다.');
 
+    // 새로고침으로 교체되기 전의 매물(이전 구간 listingKey)은 영입할 수 없음
+    const keyCycle = String(listingKey).split(':')[1];
+    if (keyCycle !== `c${userMarketRefreshMap.get(userId)}`) {
+      throw new NotFoundError('만료된 매물입니다. 이적 시장을 새로고침해 주세요.');
+    }
+
+    const purchasedKeys = userMarketPurchases.get(userId) || new Set();
+    if (purchasedKeys.has(listingKey)) throw new ConflictError('이미 영입한 매물입니다. 매물을 새로고침한 뒤 다시 영입하세요.');
+    // 동시 요청으로 같은 매물이 중복 영입되지 않도록 트랜잭션 전에 선점함
+    purchasedKeys.add(listingKey);
+    userMarketPurchases.set(userId, purchasedKeys);
+
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       const wallet = await WalletRepository.findWalletWithLock(conn, userId);
       if (!wallet) throw new NotFoundError('지갑 정보를 찾을 수 없습니다.');
-      if ((await ClubRepository.getPurchases(conn, userId, date)).includes(listingKey)) {
-        throw new ConflictError('이미 영입한 매물입니다.');
-      }
       if ((await PlayerRepository.countUserPlayers(conn, userId)) >= MARKET.MAX_ROSTER) {
         throw new InventoryFullError('선수 보유 한도를 초과합니다.');
       }
 
       await WalletService.spendGold(conn, wallet, listing.price, `TRANSFER_BUY_${listing.playerMasterId}`);
       const userPlayerId = await ClubRepository.insertPlainPlayer(conn, userId, listing.playerMasterId);
-      await ClubRepository.insertPurchase(conn, userId, date, listingKey);
       await conn.commit();
       return {
         userPlayerId,
@@ -241,6 +249,7 @@ export default class ClubService {
         remainingWallet: { cashPaid: wallet.cashPaid, cashFree: wallet.cashFree, gold: wallet.gold },
       };
     } catch (err) {
+      purchasedKeys.delete(listingKey);
       await conn.rollback().catch(() => {});
       throw err;
     } finally {

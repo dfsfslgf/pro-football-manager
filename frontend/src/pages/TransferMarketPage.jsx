@@ -95,16 +95,22 @@ export default function TransferMarketPage() {
     }
   };
 
+  // 영입한 매물은 새로고침 전까지 '영입 완료' 상태로 유지함
+  const markPurchased = (keys) => {
+    setMarket((m) => ({
+      ...m,
+      listings: m.listings.map((l) => (keys.includes(l.listingKey) ? { ...l, purchased: true } : l)),
+    }));
+    setSelectedListings((prev) => prev.filter((k) => !keys.includes(k)));
+  };
+
   const handleBuy = async (listing) => {
     setBusy(listing.listingKey);
     setNotice(null);
     try {
       const result = await buyListing(listing.listingKey);
       setWallet(result.remainingWallet);
-      setMarket((m) => ({
-        ...m,
-        listings: m.listings.map((l) => (l.listingKey === listing.listingKey ? { ...l, purchased: true } : l)),
-      }));
+      markPurchased([listing.listingKey]);
       await refreshPlayers();
       useSquadStore.setState({ loaded: false });
       setNotice({ type: 'success', text: `${listing.name} 영입 완료! (-${formatNumber(result.price)}G)` });
@@ -130,19 +136,21 @@ export default function TransferMarketPage() {
     }
     setBusy('bulk-buy');
     let boughtCount = 0;
+    const boughtKeys = [];
     try {
       for (const item of targets) {
         const result = await buyListing(item.listingKey);
         setWallet(result.remainingWallet);
+        boughtKeys.push(item.listingKey);
         boughtCount++;
       }
-      const refreshed = await fetchMarket();
-      setMarket(refreshed);
-      setSelectedListings([]);
+      markPurchased(boughtKeys);
       await refreshPlayers();
       useSquadStore.setState({ loaded: false });
       setNotice({ type: 'success', text: `⚡ 선택한 선수 ${boughtCount}명 일괄 영입 완료! (-${formatNumber(totalCost)}G)` });
     } catch (err) {
+      markPurchased(boughtKeys);
+      await refreshPlayers();
       setNotice({ type: 'error', text: errorMessage(err) });
     } finally {
       setBusy(null);
@@ -248,6 +256,7 @@ export default function TransferMarketPage() {
             {market.listings.map((l) => {
               const meta = RARITY_META[l.rarity] || RARITY_META.COMMON;
               const isChecked = selectedListings.includes(l.listingKey);
+              const ownedCount = players.filter((p) => p.playerId === l.playerMasterId).length;
               return (
                 <li
                   key={l.listingKey}
@@ -270,6 +279,7 @@ export default function TransferMarketPage() {
                   <p className="mt-2 truncate text-sm font-black text-white">{l.name}</p>
                   <p className="text-[11px] text-slate-400">
                     {l.mainPosition} {l.preferredRoleCode ? `· ${l.preferredRoleCode}` : ''}
+                    {ownedCount > 0 && <span className="ml-1 font-bold text-amber-300">· 보유 {ownedCount}장 (한계돌파 재료)</span>}
                   </p>
                   <button
                     type="button"
