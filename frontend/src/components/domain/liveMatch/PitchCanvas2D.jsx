@@ -18,6 +18,8 @@ const FULLBACK_ROLES = ['LB', 'RB', 'LWB', 'RWB'];
 const CENTERBACK_ROLES = ['CB', 'LCB', 'RCB'];
 
 const POST_GOAL_COOLDOWN_MS = 4500;
+// 코너킥 직후 공격 팀이 공을 잃었을 때 전원 복귀를 유지하는 경기 시간(ms, 재생 배속 반영)
+const CORNER_TRANSITION_SIM_MS = 11000;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -183,6 +185,7 @@ function createEngine() {
     lastDuelAt: 0,
     lastOffsideAt: 0,
     offsideVisual: null,
+    cornerTransition: null,
     lastScorerUid: null,
     touchCounts: new Map(),
     slidingEffects: [],
@@ -408,6 +411,7 @@ function syncAgents(engine, state, now) {
 function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   const { ball, agents } = engine;
   const activePlayers = [...agents.values()].filter((p) => !p.isSentOff);
+  engine.cornerTransition = null;
 
   for (const p of activePlayers) {
     p.x = p.baseX;
@@ -520,6 +524,54 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
   kicker.stunUntil = 0;
 
   const stayBackRule = tactics.cornerDefense || 'FULLBACKS';
+
+  // 수비 팀의 역습 대기 공격수(아웃렛): 기본 1명, 공격적인 수비 팀은 2명을 중원에 남겨 두므로 그에 맞춰 잔류 인원을 늘림
+  const defTeamObj = defendingTeam === 'HOME' ? state.homeTeam : state.awayTeam;
+  const outletCount = ['ATTACKING', 'ALL_OUT_ATTACK'].includes(defTeamObj?.tactics?.mentality) ? 2 : 1;
+  const speedOf = (p) => p.baseStats?.speed || 70;
+  const strikers = defenders.filter((d) => STRIKER_ROLES.includes(d.slotRoleCode)).sort((a, b) => speedOf(b) - speedOf(a));
+  const wideForwards = defenders
+    .filter((d) => !STRIKER_ROLES.includes(d.slotRoleCode) && (WINGER_ROLES.includes(d.slotRoleCode) || d.role === 'FW'))
+    .sort((a, b) => speedOf(b) - speedOf(a));
+  const outlets = [...strikers, ...wideForwards].slice(0, outletCount);
+
+  // 잔류 인원: 역습 공격수 수 + 2(커버 2명)를 기본으로 하고, 소극적 전술이면 +1, 전원 공격이면 -1 (최소 2, 최대 5)
+  const defensiveMentality = ['DEFENSIVE', 'PARK_THE_BUS'].includes(tactics.mentality);
+  const allOutMentality = tactics.mentality === 'ALL_OUT_ATTACK';
+  const requiredBack = clamp(Math.max(1, outlets.length) + 2 + (defensiveMentality ? 1 : 0) - (allOutMentality ? 1 : 0), 2, 5);
+  const stayCap = stayBackRule === 'CDM_AND_FB' ? Math.max(requiredBack, 3) : requiredBack;
+
+  const inRuleGroup = (m) => {
+    if (stayBackRule === 'CDM_AND_FB') {
+      return FULLBACK_ROLES.includes(m.slotRoleCode) || ['CDM', 'LDM', 'RDM'].includes(m.slotRoleCode);
+    }
+    if (stayBackRule === 'CENTERBACKS') return CENTERBACK_ROLES.includes(m.slotRoleCode);
+    return FULLBACK_ROLES.includes(m.slotRoleCode);
+  };
+  const defenseScore = (m) => (m.baseStats?.defense || 70) + (m.baseStats?.speed || 70) * 0.3;
+  const eligible = mates.filter((m) => m.uid !== kicker.uid);
+  const stayBacks = eligible.filter(inRuleGroup).sort((a, b) => defenseScore(b) - defenseScore(a)).slice(0, stayCap);
+  if (stayBacks.length < requiredBack) {
+    // 선택한 잔류 그룹만으로 인원이 부족하면 수비수 → 수비형 미드필더 순으로 보충함
+    const fillers = eligible
+      .filter((m) => !stayBacks.includes(m) && (m.role === 'DF' || ['CDM', 'LDM', 'RDM'].includes(m.slotRoleCode)))
+      .sort((a, b) => defenseScore(b) - defenseScore(a));
+    stayBacks.push(...fillers.slice(0, requiredBack - stayBacks.length));
+  }
+
+  // 아웃렛(x=44/56)보다 12칸 뒤에 라인을 서고, 상대 역습이 중앙으로 들어오므로 좁게(중앙 밀집) 폭을 나눔
+  const stayLineX = isHomeAtt ? 42 : 58;
+  const stayYSlots = {
+    1: [50],
+    2: [43, 57],
+    3: [38, 50, 62],
+    4: [33, 44, 56, 67],
+    5: [30, 40, 50, 60, 70],
+  }[Math.min(5, Math.max(1, stayBacks.length))];
+  const stayBackSlot = new Map(
+    [...stayBacks].sort((a, b) => (a.baseY ?? 50) - (b.baseY ?? 50)).map((m, i) => [m.uid, stayYSlots[i]])
+  );
+
   const attBoxSpots = isHomeAtt
     ? [
         [91.5, 43],
@@ -543,31 +595,19 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
       ];
 
   let boxIdx = 0;
-  let stayIdx = 0;
 
   for (const m of mates) {
     if (m.uid === kicker.uid) continue;
 
-    let shouldStayBack = false;
-    if (stayBackRule === 'FULLBACKS') {
-      shouldStayBack = FULLBACK_ROLES.includes(m.slotRoleCode);
-    } else if (stayBackRule === 'CDM_AND_FB') {
-      shouldStayBack = FULLBACK_ROLES.includes(m.slotRoleCode) || ['CDM', 'LDM', 'RDM'].includes(m.slotRoleCode);
-    } else if (stayBackRule === 'CENTERBACKS') {
-      shouldStayBack = CENTERBACK_ROLES.includes(m.slotRoleCode);
-    }
-
-    if (shouldStayBack && stayIdx < 2) {
-      const sx = isHomeAtt ? 48 - stayIdx * 5 : 52 + stayIdx * 5;
-      const sy = stayIdx === 0 ? 34 : 66;
+    if (stayBackSlot.has(m.uid)) {
+      const sy = stayBackSlot.get(m.uid);
       m.cornerRole = 'STAY_BACK';
-      m.cornerX = sx;
+      m.cornerX = stayLineX;
       m.cornerY = sy;
-      m.x = sx;
+      m.x = stayLineX;
       m.y = sy;
-      m.targetX = sx;
+      m.targetX = stayLineX;
       m.targetY = sy;
-      stayIdx++;
     } else {
       const spot = attBoxSpots[boxIdx % attBoxSpots.length];
       const tx = spot[0] + (Math.random() - 0.5) * 1.5;
@@ -608,12 +648,13 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
       ];
 
   let defBoxIdx = 0;
-  let counterOutletAssigned = false;
+  const outletYSlots = outlets.length >= 2 ? [42, 58] : [50];
 
   for (const d of defenders) {
-    if (!counterOutletAssigned && STRIKER_ROLES.includes(d.slotRoleCode)) {
+    const outletIdx = outlets.indexOf(d);
+    if (outletIdx >= 0) {
       const cx = isHomeAtt ? 56 : 44;
-      const cy = 50;
+      const cy = outletYSlots[outletIdx];
       d.cornerRole = 'COUNTER_OUTLET';
       d.cornerX = cx;
       d.cornerY = cy;
@@ -621,7 +662,6 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
       d.y = cy;
       d.targetX = cx;
       d.targetY = cy;
-      counterOutletAssigned = true;
     } else {
       const spot = defBoxSpots[defBoxIdx % defBoxSpots.length];
       const dx = spot[0] + (Math.random() - 0.5) * 1.2;
@@ -645,6 +685,8 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
   ball.holdFrames = 0;
   ball.setPieceState = 'CORNER';
   engine.attackTeam = attackingTeam;
+  // 크로스가 끝난 뒤 공을 잃으면 공격 팀 전원이 복귀하는 전환 구간(updatePlayerPositions)을 시작함
+  engine.cornerTransition = { team: attackingTeam, startedAt: now };
 
   adjustPlayerLiveStat(engine, kicker, {
     flashText: `🚩 코너킥 (${kicker.name})`,
@@ -1004,10 +1046,11 @@ function checkAndHandleOffsideOnPass(engine, carrier, target, state, now) {
 
   if (!isBeyondLine) return false;
 
+  // 오프사이드 위치로 침투한 공격수에게 패스가 나가도 일부만 부심이 놓치도록 낮은 확률로 허용함 (실제 경기에서 오프사이드는 대부분 선언됨)
   const attSpeed = target.baseStats?.speed || 76;
   const lineBreakChance = trapActive
-    ? clamp((attSpeed - avgDefStat) * 0.015 + 0.18, 0.08, 0.42)
-    : clamp((attSpeed - avgDefStat) * 0.02 + 0.45, 0.25, 0.68);
+    ? clamp((attSpeed - avgDefStat) * 0.004 + 0.06, 0.03, 0.12)
+    : clamp((attSpeed - avgDefStat) * 0.005 + 0.1, 0.04, 0.2);
 
   if (Math.random() < lineBreakChance) {
     target.x = isHomeAtt ? effectiveOffsideLineX - 0.5 : effectiveOffsideLineX + 0.5;
@@ -1027,7 +1070,7 @@ function checkAndHandleOffsideOnPass(engine, carrier, target, state, now) {
     attackerX: target.x,
     attackerY: target.y,
     attackerName: target.name,
-    defendingSide,
+    defendingSide: defendSide,
     trapActive,
     until: now + 1500,
   };
@@ -1155,6 +1198,7 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
     (a) => a.team === owner.team && a.uid !== owner.uid && !a.isSentOff && a.role !== 'GK' && a.roleCode !== 'GK'
   );
   const opponents = agents.filter((a) => a.team !== owner.team && !a.isSentOff && a.role !== 'GK');
+  const oppLineX = getLastDefenderLineX(agents, isHome ? 'AWAY' : 'HOME');
 
   const inAttackingHalf = isHome ? owner.x >= 50 : owner.x <= 50;
   const carrierIsAttacker = ATTACKER_ROLES.includes(owner.slotRoleCode);
@@ -1199,6 +1243,10 @@ function selectBestPassTarget(engine, owner, passingStyle, ball, preferKillerThr
     );
     if (laneBlocked) score -= 48;
 
+    // 수비 라인 근처(라인 앞뒤)에서 침투하는 공격수에게 스루패스를 시도함
+    if (inAttackingHalf && STRIKER_ROLES.includes(mate.slotRoleCode) && Math.abs(mate.x - oppLineX) <= 4.5) {
+      score += 24;
+    }
     score += (Math.random() - 0.5) * 14;
 
     if (score > bestScore) {
@@ -2050,7 +2098,20 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
 
   const owner = ball.ownerUid ? getAgentByUid(engine, ball.ownerUid) : null;
   const ownerIsGk = owner && (owner.role === 'GK' || owner.roleCode === 'GK');
-  const attackingTeam = owner ? owner.team : ball.x < 50 ? 'AWAY' : 'HOME';
+
+  // 코너킥 크로스가 끝난 뒤 코너를 찬 팀이 공을 갖고 있지 않으면(상대 소유 또는 주인 없는 공) 역습 대응(복귀) 구간으로 처리함
+  const cornerDeliveryActive = ball.setPieceState === 'CORNER' || (ball.mode === 'PASS' && ball.isCornerCross);
+  const cornerTransition = engine.cornerTransition;
+  const cornerTransitionOn =
+    Boolean(cornerTransition) &&
+    !cornerDeliveryActive &&
+    !ball.setPieceState &&
+    (now - cornerTransition.startedAt) * Math.max(1, playbackSpeed || 1) < CORNER_TRANSITION_SIM_MS &&
+    (owner ? owner.team !== cornerTransition.team : true);
+
+  let attackingTeam = owner ? owner.team : ball.x < 50 ? 'AWAY' : 'HOME';
+  // 주인 없는 공이 박스 근처에 있어도 이 구간에는 코너를 찬 팀을 '수비 중'으로 간주해 공격 가담을 멈추고 복귀시킴
+  if (cornerTransitionOn && !owner) attackingTeam = cornerTransition.team === 'HOME' ? 'AWAY' : 'HOME';
   const defendingTeam = attackingTeam === 'HOME' ? 'AWAY' : 'HOME';
   const defTrapEnabled = isOffsideTrapEnabled(state, defendingTeam);
 
@@ -2124,8 +2185,14 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
     const individualWaveX = Math.sin(now / 950 + p.phaseSeed) * 5.0;
     const individualWaveY = Math.cos(now / 1100 + p.phaseSeed) * 4.0;
 
-    const isCornerSituation =
-      ball.setPieceState === 'CORNER' || (ball.mode === 'PASS' && ball.isCornerCross);
+    const isCornerSituation = cornerDeliveryActive;
+
+    const isCornerTeamPlayer = cornerTransitionOn && p.team === cornerTransition.team && p.role !== 'GK' && p.roleCode !== 'GK';
+    const isStayBackCover = isCornerTeamPlayer && p.cornerRole === 'STAY_BACK';
+    const isBallAhead = dir === 1 ? p.x > ball.x - 4 : p.x < ball.x + 4;
+    const isRecoveryRunner = isCornerTeamPlayer && !isStayBackCover && isBallAhead;
+    // 전환 구간에는 코너를 찬 팀 선수 전원이 전력으로 복귀함
+    const isRecovering = isCornerTeamPlayer;
 
     p.isOverlapping = false;
     p.isPressing = isChaser;
@@ -2173,6 +2240,25 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       const goalX = p.team === 'HOME' ? 10 : 90;
       p.targetX = ball.x + (goalX - ball.x) * 0.18;
       p.targetY = clamp(ball.y + (p.baseY < ball.y ? -5 : 5), 10, 90);
+    } else if (isStayBackCover) {
+      // 잔류 수비수: 물러나기만 하면 공 소유자와 접촉이 없어 그대로 슈팅까지 허용하므로, 자기 자리를 지키며
+      // 공 소유자 쪽 중앙으로 좁혀 들어가 경로를 막고, 가까워지면 한 발 앞으로 나와 순차적으로 1:1 경합을 만듦
+      const holdX = Number.isFinite(p.cornerX) ? p.cornerX : p.team === 'HOME' ? 42 : 58;
+      const closeIn = clamp(1 - Math.abs(ball.x - holdX) / 26, 0, 1) * 0.45;
+      p.targetX = p.team === 'HOME' ? clamp(holdX + (ball.x - holdX) * closeIn, 14, 48) : clamp(holdX + (ball.x - holdX) * closeIn, 52, 86);
+      p.targetY = clamp((Number.isFinite(p.cornerY) ? p.cornerY : 50) * 0.35 + ball.y * 0.65, 22, 78);
+      p.isPressing = false;
+    } else if (isRecoveryRunner) {
+      // 박스에 올라가 있던 선수: 공보다 앞선 위치에서 공 뒤쪽(자기 골대 쪽)으로 포지션별 깊이를 두고 전력 복귀함
+      const depth = [...FULLBACK_ROLES, ...CENTERBACK_ROLES].includes(p.slotRoleCode)
+        ? 10
+        : MIDFIELDER_ROLES.includes(p.slotRoleCode)
+        ? 7
+        : 3;
+      p.targetX = dir === 1 ? Math.min(ball.x - depth, 60) : Math.max(ball.x + depth, 40);
+      p.targetY = clamp(p.baseY * 0.55 + ball.y * 0.45, 12, 88);
+      p.isPressing = false;
+      p.isMakingRun = false;
     } else if (!isMyTeamAttacking && p.role === 'DF' && defTrapEnabled) {
       p.targetX = synchronizedTrapLineX;
       p.targetY = clamp(p.baseY + (ball.y - 50) * 0.12, 12, 88);
@@ -2239,12 +2325,20 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
         const strikerPush = isMyTeamAttacking ? 12 * dir : -6 * dir;
         p.targetX = clamp(p.baseX + teamShiftX + strikerPush + individualWaveX, 22, 80);
         p.targetY = clamp(p.baseY + teamShiftY + individualWaveY * 1.2, 18, 82);
+
+        // 공격수는 상대 수비 라인 앞뒤를 오가며 침투를 시도하므로 라인을 넘는 오프사이드 위치에 서기도 함
+        const ballInAttackingHalf = p.team === 'HOME' ? ball.x >= 42 : ball.x <= 58;
+        if (isMyTeamAttacking && ballInAttackingHalf && p.slotRoleCode !== 'CAM') {
+          const oppLineX = getLastDefenderLineX(all, defendingTeam);
+          const lineGamble = Math.sin(now / 1300 + p.phaseSeed * 1.7) * 3.6 + 1.2;
+          p.targetX = clamp(oppLineX + dir * lineGamble, 30, 94);
+        }
       }
     }
 
     p.targetX = clamp(p.targetX, 8, 92);
     p.targetY = clamp(p.targetY, 8, 92);
-    movePlayerSmooth(engine, p, playbackSpeed, isCarrier || isChaser, weatherSpeedMod, now);
+    movePlayerSmooth(engine, p, playbackSpeed, isCarrier || isChaser || isRecovering, weatherSpeedMod, now);
   }
 }
 

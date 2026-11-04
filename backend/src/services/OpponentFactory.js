@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { FORMATIONS, getFormationSlots } from '../constants/formationCoords.js';
 import { MATCH } from '../constants/gameRules.js';
 import { computeOverall } from '../utils/playerMath.js';
@@ -370,22 +372,221 @@ const CLUB_TEAM_SQUADS = {
     MF: ['비티냐', '워렌 자이르에메리', '주앙 네베스', '파비안 루이스', '이강인', '데지레 두에'],
     FW: ['우스만 뎀벨레', '브래들리 바르콜라', '곤살루 하무스', '마르코 아센시오', '랑달 콜로 무아니'],
   },
+  '맨체스터 레드': {
+    GK: ['안드레 오나나', '알타이 바이으느드르'],
+    DF: ['리산드로 마르티네스', '마타이스 더 리흐트', '해리 매과이어', '누사이르 마즈라위', '디오구 달로', '루크 쇼', '레니 요로', '패트릭 도르구'],
+    MF: ['브루누 페르난드스', '카세미루', '마누엘 우가르테', '크리스티안 에릭센', '코비 마이누', '메이슨 마운트'],
+    FW: ['마커스 래시포드', '라스무스 호일룬', '알레한드로 가르나초', '안토니', '조슈아 지르크지', '아마드 디알로'],
+  },
+  '웨스트 런던 블루': {
+    GK: ['로베르트 산체스', '필리프 요르겐센'],
+    DF: ['리바이 콜윌', '트레보 찰로바', '마크 쿠쿠렐라', '말로 귀스토', '리스 제임스', '웨슬리 포파나', '브누아 바디아실', '토신 아다라비오요'],
+    MF: ['엔소 페르난데스', '모이세스 카이세도', '콜 파머', '로메오 라비아'],
+    FW: ['니콜라 잭슨', '페드루 네투', '노니 마두에케', '제이든 산초', '주앙 펠릭스', '크리스토퍼 은쿤쿠'],
+  },
+  '밀라노 레드블랙': {
+    GK: ['마이크 메냥', '마르코 스포르티엘로'],
+    DF: ['피카요 토모리', '스트라히냐 파블로비치', '마테오 가비아', '다비데 칼라브리아', '테오 에르난데스', '에메르송 로열', '말릭 티아우'],
+    MF: ['유수프 포파나', '티자니 레인더르스', '루벤 로프터스치크', '이스마엘 베나세르', '요엘 무사'],
+    FW: ['하파엘 레앙', '크리스티안 풀리시치', '알바로 모라타', '타미 에이브러햄', '사뮈엘 추쿠에제', '루카 요비치'],
+  },
+  '롬바르디아 블루블랙': {
+    GK: ['얀 좀머', '요세프 마르티네스'],
+    DF: ['프란체스코 아체르비', '알레산드로 바스토니', '벤자맹 파바르', '덴젤 둠프리스', '스테판 더 프레이', '페데리코 디마르코', '요주아 비세크', '마테오 다르미안'],
+    MF: ['니콜로 바렐라', '하칸 찰하놀루', '헨리크 미키타리안', '피오트르 지엘린스키', '다비데 프라테시'],
+    FW: ['라우타로 마르티네스', '마르쿠스 튀랑', '메흐디 타레미', '마르코 아르나우토비치'],
+  },
+  '피에몬테 블랙화이트': {
+    GK: ['미켈레 디 그레고리오', '마티아 페린'],
+    DF: ['글레이송 브레메르', '페데리코 가티', '피에르 칼룰루', '안드레아 캄비아소', '다닐루', '후안 카바우', '알렉스 산드루'],
+    MF: ['마누엘 로카텔리', '케프렌 튀랑', '테운 코프메이너르스', '더글라스 루이스', '프란시스쿠 콘세이상', '웨스턴 맥케니'],
+    FW: ['두산 블라호비치', '케난 일디즈', '니코 곤살레스', '랜들 콜로 무아니', '티모시 웨아'],
+  },
+  '나폴리 아주리': {
+    GK: ['알렉스 메레트', '엘리아 카프릴레'],
+    DF: ['조반니 디 로렌초', '아미르 라흐마니', '알레산드로 부온조르노', '마티아스 올리베라', '레오나르도 스피나촐라', '파올로 카자도'],
+    MF: ['스타니슬라프 로보트카', '프랑크 앙귀사', '스콧 맥토미니', '빌리 길모어'],
+    FW: ['로멜루 루카쿠', '데이비드 네레스', '마테오 폴리타노', '자코모 라스파도리', '지오반니 시메오네'],
+  },
+  '마드리드 로히블랑코': {
+    GK: ['얀 오블락', '후안 무소'],
+    DF: ['호세 히메네스', '로뱅 르 노르망', '클레망 랑글레', '나우엘 몰리나', '레이날두', '악셀 비첼'],
+    MF: ['코케', '로드리고 데 파울', '마르코스 요렌테', '코너 갤러거', '파블로 바리오스'],
+    FW: ['앙투안 그리즈만', '훌리안 알바레스', '알렉산더 쇠를로트', '앙헬 코레아', '줄리아노 시메오네', '사무엘 리노'],
+  },
+  '베스트팔렌 옐로우': {
+    GK: ['그레고어 코벨', '알렉산더 마이어'],
+    DF: ['니코 슐로터베크', '발데마르 안톤', '니클라스 쥘레', '율리안 라이어슨', '라미 벤세바이니', '엠레 잔'],
+    MF: ['펠릭스 은메차', '마르셀 자비처', '율리안 브란트', '파스칼 그로스', '조베 벨링엄'],
+    FW: ['세루 기라시', '카림 아데예미', '막시밀리안 바이어', '도니얼 말런', '제이미 기튼스'],
+  },
+  '라인 레드블랙': {
+    GK: ['페테르 굴라치', '마르턴 판더포르트'],
+    DF: ['빌리 오르반', '카스텔로 루케바', '루트샤렐 헤이르트라위다', '다비드 라움', '벤야민 헨리히스'],
+    MF: ['사비 시몬스', '아마두 하이다라', '니콜라스 자이발트', '크리스토프 바움가르트너', '케빈 캄플'],
+    FW: ['로이스 오펜다', '벤야민 셰슈코', '유수프 폴센', '안토니오 누사', '아산 우에드라오고'],
+  },
 };
 
-const INTERNATIONAL_POOL = {
-  GK: ['조현우', '알리송 베케르', '에데르송', '티보 쿠르투아', '마이크 메냥', '에밀리아노 마르티네스', '우나이 시몬', '다비드 라야', '조던 픽포드', '굴리엘모 비카리오'],
-  DF: ['김민재', '버질 판 데이크', '윌리엄 살리바', '후벵 디아스', '안토니오 뤼디거', '요슈코 그바르디올', '아슈라프 하키미', '테오 에르난데스', '크리스티안 로메로', '미키 판 더 펜'],
-  MF: ['이강인', '주드 벨링엄', '로드리', '케빈 더 브라위너', '페데리코 발베르데', '자말 무시알라', '플로리안 비르츠', '데클란 라이스', '페드리', '콜 파머'],
-  FW: ['손흥민', '킬리안 음바페', '엘링 홀란드', '비니시우스 주니오르', '해리 케인', '모하메드 살라', '라민 야말', '부카요 사카', '라우타로 마르티네스', '황희찬'],
+const SYNTH_GIVEN_NAMES = [
+  '마르코', '루카스', '다니엘', '안드레', '파블로', '티아고', '엠마누엘', '리카르도', '세바스티안', '마테오',
+  '알렉스', '니콜라', '다비드', '프레데리크', '요한', '라파엘', '빅토르', '이반', '카를로스', '오스카',
+];
+const SYNTH_FAMILY_NAMES = [
+  '로시', '페레이라', '무어', '슈미트', '카스티요', '알메이다', '베르그', '쿠퍼', '모레노', '한센',
+  '리치', '산토스', '브란트', '델가도', '피셔', '마르케스', '올센', '라모스', '그린', '두란',
+  '벨로', '크로스', '나바로', '볼프', '오르티스', '테일러', '위고', '카르발류', '로렌스', '세라노',
+];
+
+/**
+ * 로스터가 정의되지 않은 팀의 선수 이름을 가상 이름으로 생성함. (다른 팀의 실제 스타 선수가 섞여 나오지 않도록 함)
+ */
+function makeSyntheticName(rng, usedNames) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const name = `${rng.pick(SYNTH_GIVEN_NAMES)} ${rng.pick(SYNTH_FAMILY_NAMES)}`;
+    if (!usedNames.has(name)) return name;
+  }
+  let n = usedNames.size + 1;
+  while (usedNames.has(`선수 ${n}`)) n += 1;
+  return `선수 ${n}`;
+}
+
+const CRAWLED_TEAMS_PATH = fileURLToPath(new URL('../../real_players_by_team.json', import.meta.url));
+const MIN_CRAWLED_ROSTER_SIZE = 18;
+
+// 시나리오/대회 설정의 구단 표기와 크롤링 데이터(real_players_by_team.json)의 구단 키가 다른 경우의 별칭
+const CLUB_ALIASES = {
+  '리즈 화이트': '리즈 요크셔 화이트',
+  '번리 클라렛': '랭커셔 클라렛',
+  '선덜랜드 블랙캣츠': '웨어사이드 블랙캣츠',
+  '미들즈브러 레드': '티사이드 레드',
+  '웨스트 브롬 스로슬스': '웨스트브롬 스로슬스',
+  '노리치 카나리아': '노퍽 카나리아',
+  '블랙번 로버스': '랭커셔 로버스',
+  '왓포드 호넷츠': '하트퍼드셔 호넷츠',
+  '스완지 스완즈': '스완지 스완즈 화이트',
+  '밀월 라이온스': '사우스런던 라이온스',
+  '프레스턴 릴리와이츠': '프레스턴 릴리화이트',
+  '퀸즈 파크 후프스': '런던 호프스 블루',
+  '스토크 포터스': '스토크 포터스 레드',
+  '헐 타이거즈': '험버사이드 타이거즈',
+  '카디프 블루버즈': '사우스웨일스 블루버즈',
+  '더비 램스': '더비 램스 화이트',
+  '옥스퍼드 옐로우스': '옥스퍼드 옐로우즈',
+  '플리머스 필그림스': '데본 필그림스 그린',
+  '루턴 해터스': '베드퍼드셔 해터스',
+  '김천 밀리터리레드': '김천 피닉스 레드',
+  '제주 아일랜드오렌지': '제주 아일랜드 오렌지',
+  '광주 그리핀옐로우': '광주 그리핀 옐로우',
+  '대구 스카이블루': '대구 스카이솔라',
+  '인천 블루블랙': '인천 블루블랙 마린',
+  '서울 이랜드 레오파즈': '서울 레오파즈 네이비',
+  '부산 아이파크레드': '부산 로열실드',
 };
+
+const ROLE_FAMILIES = [
+  ['CB', 'LCB', 'RCB', 'SW'],
+  ['LB', 'LWB'],
+  ['RB', 'RWB'],
+  ['CDM', 'LDM', 'RDM'],
+  ['CM', 'LCM', 'RCM'],
+  ['CAM', 'LAM', 'RAM'],
+  ['LM', 'LW', 'LF'],
+  ['RM', 'RW', 'RF'],
+  ['ST', 'LST', 'RST', 'CF'],
+];
+
+function sameRoleFamily(a, b) {
+  if (a === b) return true;
+  return ROLE_FAMILIES.some((fam) => fam.includes(a) && fam.includes(b));
+}
+
+function normalizeClubName(name) {
+  return String(name || '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\b(AI|FC)\b/gi, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function bigramDice(a, b) {
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+  const grams = (s) => {
+    const m = new Map();
+    for (let i = 0; i < s.length - 1; i++) {
+      const g = s.slice(i, i + 2);
+      m.set(g, (m.get(g) || 0) + 1);
+    }
+    return m;
+  };
+  const ga = grams(a);
+  const gb = grams(b);
+  let common = 0;
+  for (const [g, n] of ga) common += Math.min(n, gb.get(g) || 0);
+  return (2 * common) / (a.length - 1 + (b.length - 1));
+}
+
+let crawledClubIndex = null;
+
+/**
+ * 크롤러가 생성한 구단별 실제 선수단(real_players_by_team.json)을 포지션별 이름 목록(OVR 내림차순)으로 색인함.
+ * 파일이 없거나 형식이 올바르지 않으면 빈 색인을 반환함.
+ */
+function loadCrawledClubIndex() {
+  if (crawledClubIndex) return crawledClubIndex;
+  crawledClubIndex = new Map();
+  try {
+    const raw = JSON.parse(readFileSync(CRAWLED_TEAMS_PATH, 'utf-8'));
+    for (const [clubKey, players] of Object.entries(raw)) {
+      if (!Array.isArray(players) || clubKey === '글로벌 스타 풀' || players.length < MIN_CRAWLED_ROSTER_SIZE) continue;
+      const pool = { GK: [], DF: [], MF: [], FW: [], roles: {} };
+      const sorted = [...players].sort((a, b) => (b.overall || 0) - (a.overall || 0));
+      for (const p of sorted) {
+        if (!p?.name || !pool[p.mainPosition]) continue;
+        pool[p.mainPosition].push(p.name);
+        pool.roles[p.name] = String(p.preferredRoleCode || p.mainPosition).toUpperCase();
+      }
+      if (pool.GK.length > 0 && pool.DF.length >= 4 && pool.MF.length >= 3 && pool.FW.length >= 2) {
+        crawledClubIndex.set(normalizeClubName(clubKey), pool);
+      }
+    }
+  } catch {
+    // 크롤링 데이터가 없으면 내장 선수단 또는 가상 이름을 사용함
+  }
+  return crawledClubIndex;
+}
+
+function findCrawledRoster(teamName) {
+  const index = loadCrawledClubIndex();
+  if (index.size === 0) return null;
+  const rawClean = String(teamName || '').trim();
+  const normalized = normalizeClubName(CLUB_ALIASES[rawClean] || CLUB_ALIASES[rawClean.replace(/\s*(AI|FC)\s*$/i, '')] || rawClean);
+  if (!normalized) return null;
+  if (index.has(normalized)) return index.get(normalized);
+
+  let best = null;
+  let bestScore = 0;
+  for (const [key, pool] of index) {
+    const score = key.includes(normalized) || normalized.includes(key) ? 0.9 : bigramDice(normalized, key);
+    if (score > bestScore && key.slice(0, 2) === normalized.slice(0, 2)) {
+      bestScore = score;
+      best = pool;
+    }
+  }
+  return bestScore >= 0.6 ? best : null;
+}
 
 function findRosterForTeam(teamName) {
   const clean = String(teamName || '').trim();
-  for (const [natName, roster] of Object.entries(NATIONAL_TEAM_SQUADS)) {
-    if (clean.includes(natName) || natName.includes(clean)) return roster;
-  }
+  const nationName = clean.replace(/\s*국가대표팀$/, '');
+  if (NATIONAL_TEAM_SQUADS[nationName]) return NATIONAL_TEAM_SQUADS[nationName];
+
+  // 구단은 크롤링한 실제 소속 선수단을 우선 사용하고, 없으면 내장 선수단을 사용함
+  const crawled = findCrawledRoster(clean);
+  if (crawled) return crawled;
+  const normalized = normalizeClubName(clean);
   for (const [clubKey, roster] of Object.entries(CLUB_TEAM_SQUADS)) {
-    if (clean.includes(clubKey) || clubKey.includes(clean)) return roster;
+    if (normalized && normalizeClubName(clubKey) === normalized) return roster;
   }
   return null;
 }
@@ -406,18 +607,23 @@ function makeAiPlayer(rng, id, rawMainPosition, rawRoleCode, strength, namePool,
   const roleCode = String(rawRoleCode || mainPosition).toUpperCase().trim();
   const baseStats = makeStats(rng, mainPosition, strength);
 
-  const primaryList = Array.isArray(namePool?.[mainPosition]) ? namePool[mainPosition] : INTERNATIONAL_POOL[mainPosition];
-  const fallbackList = Array.isArray(INTERNATIONAL_POOL[mainPosition]) ? INTERNATIONAL_POOL[mainPosition] : INTERNATIONAL_POOL.MF;
-
-  const candidates = primaryList.filter((n) => !usedNames.has(n));
-  const fallbackCandidates = fallbackList.filter((n) => !usedNames.has(n));
-
-  const pickedName =
-    candidates.length > 0
-      ? rng.pick(candidates)
-      : fallbackCandidates.length > 0
-      ? rng.pick(fallbackCandidates)
-      : rng.pick(primaryList.length > 0 ? primaryList : fallbackList);
+  const roster = Array.isArray(namePool?.[mainPosition]) ? namePool[mainPosition] : [];
+  const candidates = roster.filter((n) => !usedNames.has(n));
+  let pickedName;
+  if (candidates.length > 0 && namePool.roles) {
+    // 크롤링 선수단(OVR 순): 슬롯 세부 포지션과 맞는 최상위 선수를 우선 기용함
+    pickedName = candidates.find((n) => sameRoleFamily(namePool.roles[n], roleCode)) || candidates[0];
+  } else if (candidates.length > 0) {
+    pickedName = rng.pick(candidates);
+  } else if (namePool?.roles && mainPosition !== 'GK') {
+    // 해당 포지션 선수가 부족하면 같은 구단의 다른 필드 포지션 선수를 기용함 (가상 이름보다 실제 소속 선수를 우선)
+    const spare = ['DF', 'MF', 'FW']
+      .flatMap((pos) => namePool[pos] || [])
+      .filter((n) => !usedNames.has(n));
+    pickedName = spare.length > 0 ? spare[0] : makeSyntheticName(rng, usedNames);
+  } else {
+    pickedName = makeSyntheticName(rng, usedNames);
+  }
 
   usedNames.add(pickedName);
 
@@ -445,7 +651,7 @@ export function buildOpponent({ seed, name, strength = 75, formation = null, tac
   const slots = getFormationSlots(chosenFormation);
 
   const matchedRoster = findRosterForTeam(name);
-  const activePool = matchedRoster || INTERNATIONAL_POOL;
+  const activePool = matchedRoster || {};
   const usedNames = new Set();
 
   let seq = 1;
