@@ -1,3 +1,19 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Windows의 Chrome/Edge는 국기 이모지를 지원하지 않아 "KR" 같은 글자로 표시됨.
+ * 국기 글리프만 담은 폰트(Twemoji Country Flags, CC-BY 4.0)를 해당 유니코드 범위에만 적용해 어느 OS에서나 국기가 보이도록 함.
+ */
+@font-face {
+  font-family: 'Twemoji Country Flags';
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E007F;
+  src: url('/fonts/TwemojiCountryFlags.woff2') format('woff2');
+  font-display: swap;
+}
+
+html {
+  font-family: 'Twemoji Country Flags', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}

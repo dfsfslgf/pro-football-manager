@@ -113,6 +113,13 @@ function teamName(state, id, clubName) {
   return id || '미정';
 }
 
+/** 월드컵 모드(조 편성이 있는 상태)에서만 국가 이름 앞에 국기 이모지를 붙임 */
+function teamLabel(state, id, clubName) {
+  const flag = state?.groups ? state?.teams?.[id]?.emblem : null;
+  const name = teamName(state, id, clubName);
+  return flag ? `${flag} ${name}` : name;
+}
+
 function OpponentScoutModal({ teamInfo, onClose }) {
   if (!teamInfo) return null;
   return (
@@ -198,6 +205,8 @@ function Bracket({ state, clubName, onInspectTeam }) {
                 const hasUser = m.a === userIdKey || m.b === userIdKey;
                 const nameA = teamName(state, m.a, clubName);
                 const nameB = teamName(state, m.b, clubName);
+                const labelA = teamLabel(state, m.a, clubName);
+                const labelB = teamLabel(state, m.b, clubName);
                 return (
                   <li
                     key={i}
@@ -211,7 +220,7 @@ function Bracket({ state, clubName, onInspectTeam }) {
                         aWon ? 'font-black text-white' : 'text-slate-400'
                       }`}
                     >
-                      <span className="truncate">{nameA}</span>
+                      <span className="truncate">{labelA}</span>
                       <span>{played ? m.ga : '-'}</span>
                     </div>
                     <div
@@ -220,7 +229,7 @@ function Bracket({ state, clubName, onInspectTeam }) {
                         bWon ? 'font-black text-white' : 'text-slate-400'
                       }`}
                     >
-                      <span className="truncate">{nameB}</span>
+                      <span className="truncate">{labelB}</span>
                       <span>{played ? m.gb : '-'}</span>
                     </div>
                   </li>
@@ -303,11 +312,11 @@ function LeagueView({ detail, clubName, onInspectTeam }) {
                   r.h === 'USER' || r.a === 'USER' ? 'bg-blue-500/10 font-bold text-white' : ''
                 }`}
               >
-                <span className="truncate">{teamName(state, r.h, clubName)}</span>
+                <span className="truncate">{teamLabel(state, r.h, clubName)}</span>
                 <span className="px-2">
                   {r.hg} : {r.ag}
                 </span>
-                <span className="truncate text-right">{teamName(state, r.a, clubName)}</span>
+                <span className="truncate text-right">{teamLabel(state, r.a, clubName)}</span>
               </li>
             ))}
           </ul>
@@ -447,7 +456,7 @@ function WorldCupView({ detail, clubName, selectedNation, onSelectNation, onInsp
                               onClick={() => onSelectNation(natMeta)}
                               className="inline-flex items-center gap-0.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200 hover:bg-amber-500/40"
                             >
-                              <Check className="h-2.5 w-2.5" /> {r.name} 선택
+                              <Check className="h-2.5 w-2.5" /> {natMeta.emblem} {r.name} 선택
                             </button>
                           )}
                           <button
@@ -455,7 +464,7 @@ function WorldCupView({ detail, clubName, selectedNation, onSelectNation, onInsp
                             onClick={() => onInspectTeam(state?.teams?.[r.id] || { code: r.id, name: r.name })}
                             className="inline-flex items-center gap-0.5 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300 hover:text-white"
                           >
-                            🔍 {r.name} 명단
+                            🔍 {natMeta?.emblem} {r.name} 명단
                           </button>
                         </div>
                       );

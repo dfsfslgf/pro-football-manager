@@ -5,7 +5,13 @@ import { FAMILIARITY_META } from '../../../constants/tacticsConfig.js';
 const WIDTH = 900;
 const HEIGHT = 540;
 const MARGIN = 28;
-const CELEBRATION_MS = 1800;
+const CELEBRATION_MS = 10000;
+const POST_GOAL_SHOT_LOCK_MS = 1800;
+const REPLAY_WINDOW_MS = 5000;
+const REPLAY_SAMPLE_MS = 33;
+const REPLAY_RATE = 0.4;
+const REPLAY_HOLD_MS = 1200;
+const REPLAY_MIN_FRAMES = 8;
 const SHOT_SPEED = 2.85;
 const SHOT_TIMEOUT_FRAMES = 48;
 const PASS_TIMEOUT_FRAMES = 46;
@@ -186,7 +192,10 @@ function createEngine() {
     lastOffsideAt: 0,
     offsideVisual: null,
     cornerTransition: null,
+    cornerPrelude: null,
     lastScorerUid: null,
+    sequence: null,
+    replayFrames: [],
     touchCounts: new Map(),
     slidingEffects: [],
     headerEffects: [],
@@ -412,6 +421,8 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   const { ball, agents } = engine;
   const activePlayers = [...agents.values()].filter((p) => !p.isSentOff);
   engine.cornerTransition = null;
+  engine.cornerPrelude = null;
+  engine.replayFrames = [];
 
   for (const p of activePlayers) {
     p.x = p.baseX;
@@ -444,6 +455,7 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   ball.aerialContestResolved = false;
   ball.isGkClearance = false;
   ball.setPieceState = null;
+  ball.cornerWaiting = false;
   ball.isGoalOutcome = false;
   ball.shotOutcome = null;
   ball.shotTrail = [];
@@ -482,6 +494,64 @@ function resetPositionsForKickoff(engine, concededTeam, now, speed = 1) {
   engine.postGoalWaitUntil = now + POST_GOAL_COOLDOWN_MS / clamp(speed, 1, 2.5);
 }
 
+const CORNER_PRELUDE_MIN_MS = 600;
+const CORNER_PRELUDE_MAX_MS = 1500;
+// 코너킥 때 공이 놓이는 코너 지점과 키커의 위치 (정확히 코너 플래그 근처)
+const CORNER_BALL_X = 99.6;
+const CORNER_BALL_Y = 1;
+const CORNER_KICKER_X = 98.4;
+const CORNER_KICKER_Y = 2.4;
+
+/**
+ * 슈팅이 막히거나 선방에 걸려 공이 골라인 밖으로 나가는 장면을 먼저 보여준 뒤 코너킥을 세팅함
+ */
+function startCornerPrelude(engine, attackingTeam, now) {
+  const { ball } = engine;
+  const toX = attackingTeam === 'HOME' ? CORNER_BALL_X : 100 - CORNER_BALL_X;
+  const toY = ball.y < 50 ? CORNER_BALL_Y : 100 - CORNER_BALL_Y;
+  const dist = Math.hypot(toX - ball.x, toY - ball.y);
+
+  ball.mode = 'LOOSE';
+  ball.ownerUid = null;
+  ball.targetUid = null;
+  ball.isShot = false;
+  ball.isKillerPass = false;
+  ball.isAerial = false;
+  ball.isCornerCross = false;
+  ball.shotTrail = [];
+  ball.passTrail = [];
+  ball.vx = 0;
+  ball.vy = 0;
+  ball.setPieceState = 'CORNER_PRELUDE';
+  ball.cornerWaiting = false;
+  engine.attackTeam = attackingTeam;
+  engine.cornerPrelude = {
+    team: attackingTeam,
+    fromX: ball.x,
+    fromY: ball.y,
+    toX,
+    toY,
+    startedAt: now,
+    durationMs: clamp(dist * 30, CORNER_PRELUDE_MIN_MS, CORNER_PRELUDE_MAX_MS),
+  };
+}
+
+function advanceCornerPrelude(engine, now, speed) {
+  const prelude = engine.cornerPrelude;
+  const { ball } = engine;
+  const t = clamp(((now - prelude.startedAt) * clamp(speed, 1, 2.5)) / prelude.durationMs, 0, 1);
+  ball.x = prelude.fromX + (prelude.toX - prelude.fromX) * t;
+  ball.y = prelude.fromY + (prelude.toY - prelude.fromY) * t;
+  ball.z = Math.sin(t * Math.PI) * 6;
+  if (t < 1) return;
+
+  engine.cornerPrelude = null;
+  ball.z = 0;
+  ball.setPieceState = null;
+  setupCornerKickPlay(engine, prelude.team, now);
+  if (!ball.setPieceState) ball.mode = 'LOOSE';
+}
+
 function setupCornerKickPlay(engine, attackingTeam, now) {
   const { ball, agents } = engine;
   const state = useLiveMatchStore.getState();
@@ -510,15 +580,16 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
     const filtered = mates.filter((m) => FULLBACK_ROLES.includes(m.slotRoleCode));
     if (filtered.length > 0) kickerPool = filtered;
   }
-  const kicker = [...kickerPool].sort((a, b) => (b.baseStats?.passing || 75) - (a.baseStats?.passing || 75))[0];
 
-  const cornerX = isHomeAtt ? 98.0 : 2.0;
-  const cornerY = ball.y < 50 ? 3.5 : 96.5;
+  // 키커는 공이 놓인 코너 바로 옆(코너 아크 안쪽)에 선다
+  const cornerX = isHomeAtt ? CORNER_KICKER_X : 100 - CORNER_KICKER_X;
+  const cornerY = ball.y < 50 ? CORNER_KICKER_Y : 100 - CORNER_KICKER_Y;
+  // 공이 놓인 코너 지점에서 멀리 있는 선수가 키커가 되면 오래 달려야 하므로 패스 능력과 거리를 함께 고려함
+  const kickerScore = (m) => (m.baseStats?.passing || 75) - Math.hypot(m.x - cornerX, m.y - cornerY) * 0.25;
+  const kicker = [...kickerPool].sort((a, b) => kickerScore(b) - kickerScore(a))[0];
   kicker.cornerRole = 'KICKER';
   kicker.cornerX = cornerX;
   kicker.cornerY = cornerY;
-  kicker.x = cornerX;
-  kicker.y = cornerY;
   kicker.targetX = cornerX;
   kicker.targetY = cornerY;
   kicker.stunUntil = 0;
@@ -679,11 +750,14 @@ function setupCornerKickPlay(engine, attackingTeam, now) {
 
   ball.mode = 'LOCKED';
   ball.ownerUid = kicker.uid;
-  ball.x = cornerX;
-  ball.y = cornerY;
+  ball.x = isHomeAtt ? CORNER_BALL_X : 100 - CORNER_BALL_X;
+  ball.y = cornerY < 50 ? CORNER_BALL_Y : 100 - CORNER_BALL_Y;
   ball.z = 0;
   ball.holdFrames = 0;
   ball.setPieceState = 'CORNER';
+  // 키커가 공이 놓인 코너 지점까지 걸어/뛰어올 때까지 공은 그 자리에 정지해 있음
+  ball.cornerWaiting = true;
+  ball.cornerKickerUid = kicker.uid;
   engine.attackTeam = attackingTeam;
   // 크로스가 끝난 뒤 공을 잃으면 공격 팀 전원이 복귀하는 전환 구간(updatePlayerPositions)을 시작함
   engine.cornerTransition = { team: attackingTeam, startedAt: now };
@@ -847,7 +921,7 @@ function triggerShot(engine, shooter, state, now, shotStyle = 'NORMAL') {
         });
 
         if (Math.random() < 0.3) {
-          setupCornerKickPlay(engine, shooter.team, now);
+          startCornerPrelude(engine, shooter.team, now);
           return;
         }
 
@@ -1276,7 +1350,16 @@ function handleCarrierDecision(engine, carrier, state, now) {
   }
 
   if (ball.setPieceState === 'CORNER') {
-    if (ball.holdFrames >= 10) {
+    if (ball.cornerWaiting) {
+      const arrived =
+        Math.hypot(carrier.x - carrier.targetX, carrier.y - carrier.targetY) < 2.5 || ball.holdFrames > 600;
+      if (arrived) {
+        ball.cornerWaiting = false;
+        ball.holdFrames = 0;
+      }
+      return;
+    }
+    if (ball.holdFrames >= 25) {
       const boxTargets = all.filter(
         (p) =>
           p.team === carrier.team &&
@@ -1644,7 +1727,7 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
 
         if (enemyGk && ball.shotOutcome === 'SAVED') {
           if (Math.random() < 0.35) {
-            setupCornerKickPlay(engine, attackSide, now);
+            startCornerPrelude(engine, attackSide, now);
             return;
           }
           ball.mode = 'LOCKED';
@@ -1688,6 +1771,10 @@ function updateBallPhysics(engine, activePlayers, state, playbackSpeed = 1, now)
     if (!owner) {
       ball.mode = 'LOOSE';
       ball.ownerUid = null;
+      ball.vx = 0;
+      ball.vy = 0;
+    } else if (ball.setPieceState === 'CORNER' && owner.uid === ball.cornerKickerUid) {
+      // 코너킥을 차기 전까지 공은 코너 지점에 그대로 둠
       ball.vx = 0;
       ball.vy = 0;
     } else {
@@ -1965,6 +2052,11 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
   const speed = state.playbackSpeed || 1;
   const activePlayers = [...agents.values()].filter((a) => !a.isSentOff);
 
+  if (engine.cornerPrelude) {
+    advanceCornerPrelude(engine, now, speed);
+    return;
+  }
+
   updateBallPhysics(engine, activePlayers, state, speed, now);
 
   if (ball.mode === 'GOAL_NET') {
@@ -1988,6 +2080,9 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
       });
     }
 
+    startGoalSequence(engine, now, scoringTeam);
+    store.setGoalSequence('CELEBRATION');
+
     const minute = state.minute || 1;
     setGoalBanner({
       id: `${minute}_${now}`,
@@ -2000,11 +2095,6 @@ function updateBallAndMatchFlow(engine, state, now, setGoalBanner) {
         ? '⚡ 상대 키퍼 실책을 틈탄 단독 돌파 골!'
         : '⚡ 단독 돌파 원더골!',
     });
-    engine.bannerUntil = now + CELEBRATION_MS;
-    engine.bannerActive = true;
-
-    const concededTeam = scoringTeam === 'HOME' ? 'AWAY' : 'HOME';
-    resetPositionsForKickoff(engine, concededTeam, now, speed);
     return;
   }
 
@@ -2336,8 +2426,11 @@ function updatePlayerPositions(engine, state, playbackSpeed, now) {
       }
     }
 
-    p.targetX = clamp(p.targetX, 8, 92);
-    p.targetY = clamp(p.targetY, 8, 92);
+    const isCornerKicker = isCornerSituation && p.cornerRole === 'KICKER';
+    if (!isCornerKicker) {
+      p.targetX = clamp(p.targetX, 8, 92);
+      p.targetY = clamp(p.targetY, 8, 92);
+    }
     movePlayerSmooth(engine, p, playbackSpeed, isCarrier || isChaser || isRecovering, weatherSpeedMod, now);
   }
 }
@@ -2699,6 +2792,19 @@ function drawShotAndKillerPassTrail(ctx, ball) {
 
 function drawActionFlashes(ctx, engine, now) {
   const ball = engine.ball;
+  if (engine.cornerPrelude || ball.cornerWaiting) {
+    const px = clamp(toPx(ball.x), 70, WIDTH - 70);
+    const py = clamp(toPy(ball.y) + (ball.y < 50 ? 26 : -26), 20, HEIGHT - 20);
+    ctx.save();
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(engine.cornerPrelude ? '⛔ 아웃! 코너킥' : '🚩 코너킥 준비', px, py);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText(engine.cornerPrelude ? '⛔ 아웃! 코너킥' : '🚩 코너킥 준비', px, py);
+    ctx.restore();
+  }
   if (ball.shooterFlashEnd && now < ball.shooterFlashEnd) {
     const shooter = [...engine.agents.values()].find(
       (a) => a.team === ball.shotTeam && a.name === ball.shooterName
@@ -2731,6 +2837,288 @@ function drawActionFlashes(ctx, engine, now) {
   }
 }
 
+const lerp = (a, b, k) => a + (b - a) * k;
+
+/**
+ * 다시보기용 프레임(전 선수/공 위치 스냅샷)을 일정 간격으로 기록하고 최근 REPLAY_WINDOW_MS만 유지함
+ */
+function recordReplayFrame(engine, now, force = false) {
+  const frames = engine.replayFrames;
+  const last = frames[frames.length - 1];
+  if (!force && last && now - last.t < REPLAY_SAMPLE_MS) return;
+
+  const agents = new Map();
+  for (const [key, a] of engine.agents) {
+    agents.set(key, {
+      x: a.x,
+      y: a.y,
+      hasBall: a.hasBall,
+      jumpUntil: a.jumpUntil,
+      slideUntil: a.slideUntil,
+      slideAngle: a.slideAngle,
+      isPressing: a.isPressing,
+      isOverlapping: a.isOverlapping,
+      isSteppingUpTrap: a.isSteppingUpTrap,
+      flash: a.flash,
+    });
+  }
+  const b = engine.ball;
+  frames.push({
+    t: now,
+    agents,
+    ball: {
+      x: b.x,
+      y: b.y,
+      z: b.z || 0,
+      mode: b.mode,
+      isShot: b.isShot,
+      isKillerPass: b.isKillerPass,
+      isAerial: b.isAerial,
+      shotTrail: b.shotTrail.slice(),
+      passTrail: b.passTrail.slice(),
+      shotTeam: b.shotTeam,
+      shooterName: b.shooterName,
+      shooterFlashEnd: b.shooterFlashEnd,
+      keeperSaveFlashEnd: b.keeperSaveFlashEnd,
+      keeperSaveText: b.keeperSaveText,
+    },
+  });
+  while (frames.length > 0 && now - frames[0].t > REPLAY_WINDOW_MS) frames.shift();
+}
+
+function findScorerAgent(engine, team) {
+  const byUid = engine.lastScorerUid ? engine.agents.get(engine.lastScorerUid) : null;
+  if (byUid && byUid.team === team) return byUid;
+  return [...engine.agents.values()].find((a) => a.team === team && a.name === engine.ball.shooterName) || null;
+}
+
+/**
+ * 득점 직후 세레머니(10초) → 슬로우 모션 다시보기 순서로 진행되는 연출을 시작함
+ */
+function startGoalSequence(engine, now, scoringTeam) {
+  const { ball } = engine;
+  recordReplayFrame(engine, now, true);
+
+  // 일시정지 등으로 생긴 시간 공백은 다시보기에서 짧게 압축
+  const frames = engine.replayFrames;
+  let rt = 0;
+  frames.forEach((f, i) => {
+    if (i > 0) rt += Math.min(f.t - frames[i - 1].t, REPLAY_SAMPLE_MS * 3);
+    f.rt = rt;
+  });
+
+  const scorer = findScorerAgent(engine, scoringTeam);
+  const isHome = scoringTeam === 'HOME';
+  ball.shotTrail = [];
+  ball.passTrail = [];
+  ball.isShot = false;
+
+  for (const a of engine.agents.values()) {
+    a.hasBall = false;
+    a.isPressing = false;
+    a.isOverlapping = false;
+    a.isSteppingUpTrap = false;
+  }
+  if (scorer) {
+    scorer.flash = { type: 'CUSTOM', text: '⚽ GOAL!', color: '#fde047', until: now + CELEBRATION_MS };
+  }
+
+  engine.sequence = {
+    phase: 'CELEBRATION',
+    team: scoringTeam,
+    scorerUid: scorer?.uid || null,
+    startedAt: now,
+    lastNow: now,
+    spot: { x: isHome ? 94 : 6, y: scorer && scorer.y >= 50 ? 92 : 8 },
+    frames: frames.slice(),
+    totalRt: rt,
+    playhead: 0,
+    skip: false,
+    confetti: [],
+  };
+  engine.replayFrames = [];
+}
+
+function stepToward(a, tx, ty, speed, dt) {
+  const dx = tx - a.x;
+  const dy = ty - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.4) return true;
+  const step = Math.min(dist, speed * dt);
+  a.x += (dx / dist) * step;
+  a.y += (dy / dist) * step;
+  return dist - step < 1.2;
+}
+
+function updateConfetti(seq, now, dt) {
+  const elapsed = now - seq.startedAt;
+  if (elapsed < CELEBRATION_MS * 0.7) {
+    const spawn = Math.ceil(dt * 110) + (elapsed < 400 ? 18 : 0);
+    const colors = ['#fde047', '#f97316', '#38bdf8', '#4ade80', '#f472b6', '#ffffff'];
+    for (let i = 0; i < spawn; i++) {
+      seq.confetti.push({
+        x: Math.random() * WIDTH,
+        y: -10 - Math.random() * 40,
+        vx: (Math.random() - 0.5) * 60,
+        vy: 70 + Math.random() * 110,
+        w: 4 + Math.random() * 4,
+        h: 6 + Math.random() * 6,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 9,
+        color: colors[Math.floor(Math.random() * colors.length)],
+      });
+    }
+  }
+  for (const p of seq.confetti) {
+    p.x += p.vx * dt + Math.sin(now / 250 + p.rot * 5) * 0.5;
+    p.y += p.vy * dt;
+    p.rot += p.vr * dt;
+  }
+  seq.confetti = seq.confetti.filter((p) => p.y < HEIGHT + 12);
+}
+
+function updateCelebration(engine, seq, now, dt) {
+  const scorer = seq.scorerUid ? engine.agents.get(seq.scorerUid) : null;
+  const mates = [...engine.agents.values()]
+    .filter((a) => a.team === seq.team && a !== scorer && !a.isSentOff && a.role !== 'GK' && a.roleCode !== 'GK')
+    .sort((a, b) => a.uid.localeCompare(b.uid));
+
+  const jump = (a, stagger = 0) => {
+    if (!a.jumpUntil || now > a.jumpUntil + 120 + stagger) a.jumpUntil = now + 520;
+  };
+
+  let anchor = { x: seq.spot.x, y: seq.spot.y };
+  if (scorer) {
+    const arrived = stepToward(scorer, seq.spot.x, seq.spot.y, 22, dt);
+    anchor = { x: scorer.x, y: scorer.y };
+    if (arrived) jump(scorer);
+  }
+
+  mates.forEach((a, i) => {
+    const angle = (i / Math.max(1, mates.length)) * Math.PI * 2 + 0.6;
+    const ring = 1 + (i % 2) * 0.55;
+    const tx = clamp(anchor.x + Math.cos(angle) * 5 * ring, 2, 98);
+    const ty = clamp(anchor.y + Math.sin(angle) * 8 * ring, 4, 96);
+    if (stepToward(a, tx, ty, 17, dt)) jump(a, (i % 4) * 140);
+  });
+
+  updateConfetti(seq, now, dt);
+}
+
+function drawConfetti(ctx, confetti) {
+  for (const p of confetti) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+    ctx.restore();
+  }
+}
+
+function endGoalSequence(engine, now, speed) {
+  const seq = engine.sequence;
+  if (!seq) return;
+  engine.sequence = null;
+  resetPositionsForKickoff(engine, seq.team === 'HOME' ? 'AWAY' : 'HOME', now, speed);
+  engine.bannerActive = true;
+  engine.bannerUntil = now + POST_GOAL_SHOT_LOCK_MS;
+  useLiveMatchStore.getState().setGoalSequence(null);
+}
+
+/**
+ * 세레머니 → 다시보기 → 킥오프 복귀 단계 전환을 처리함
+ */
+function updateGoalSequence(engine, state, now, setGoalBanner) {
+  const seq = engine.sequence;
+  const dt = clamp((now - seq.lastNow) / 1000, 0, 0.1);
+  seq.lastNow = now;
+  const speed = state.playbackSpeed || 1;
+
+  if (seq.phase === 'CELEBRATION') {
+    updateCelebration(engine, seq, now, dt);
+    if (now - seq.startedAt >= CELEBRATION_MS) {
+      setGoalBanner(null);
+      const store = useLiveMatchStore.getState();
+      if (typeof store.clearLastGoalEvent === 'function') store.clearLastGoalEvent();
+      if (seq.frames.length < REPLAY_MIN_FRAMES) {
+        endGoalSequence(engine, now, speed);
+        return;
+      }
+      seq.phase = 'REPLAY';
+      seq.playhead = 0;
+      seq.confetti = [];
+      store.setGoalSequence('REPLAY');
+    }
+    return;
+  }
+
+  seq.playhead += dt * 1000 * REPLAY_RATE;
+  if (seq.skip || seq.playhead >= seq.totalRt + REPLAY_HOLD_MS * REPLAY_RATE) {
+    endGoalSequence(engine, now, speed);
+  }
+}
+
+/**
+ * 기록된 프레임 사이를 보간해 슬로우 모션 다시보기 화면을 그림
+ */
+function renderReplay(ctx, engine, state) {
+  const seq = engine.sequence;
+  const { frames, totalRt } = seq;
+  const head = clamp(seq.playhead, 0, totalRt);
+  let i = 0;
+  while (i < frames.length - 2 && frames[i + 1].rt <= head) i++;
+  const fa = frames[i];
+  const fb = frames[Math.min(i + 1, frames.length - 1)];
+  const span = fb.rt - fa.rt;
+  const k = span > 0 ? clamp((head - fa.rt) / span, 0, 1) : 0;
+
+  const agents = new Map();
+  for (const [key, sa] of fa.agents) {
+    const base = engine.agents.get(key);
+    if (!base) continue;
+    const sb = fb.agents.get(key) || sa;
+    agents.set(key, { ...base, ...sa, x: lerp(sa.x, sb.x, k), y: lerp(sa.y, sb.y, k) });
+  }
+  const view = {
+    agents,
+    ball: { ...fa.ball, x: lerp(fa.ball.x, fb.ball.x, k), y: lerp(fa.ball.y, fb.ball.y, k), z: lerp(fa.ball.z, fb.ball.z, k) },
+    slidingEffects: [],
+    headerEffects: [],
+    offsideVisual: null,
+  };
+  render(ctx, view, state, fa.t);
+
+  const scorer = seq.scorerUid ? agents.get(seq.scorerUid) : null;
+  if (scorer) {
+    ctx.save();
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(toPx(scorer.x), toPy(scorer.y), 19, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(56,189,248,0.7)';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, WIDTH - 4, HEIGHT - 4);
+  ctx.fillStyle = 'rgba(2,6,23,0.7)';
+  ctx.fillRect(12, 12, 190, 30);
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`⏪ REPLAY · SLOW ${REPLAY_RATE}x`, 22, 27);
+  ctx.fillStyle = 'rgba(148,163,184,0.35)';
+  ctx.fillRect(12, HEIGHT - 10, WIDTH - 24, 4);
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillRect(12, HEIGHT - 10, (WIDTH - 24) * (head / Math.max(1, totalRt)), 4);
+  ctx.restore();
+}
+
 function render(ctx, engine, state, now) {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
   drawPitch(ctx, WIDTH, HEIGHT, state.weather?.code);
@@ -2754,19 +3142,9 @@ function render(ctx, engine, state, now) {
 
 export default function PitchCanvas2D() {
   const canvasRef = useRef(null);
+  const engineRef = useRef(null);
   const [goalBanner, setGoalBanner] = useState(null);
-
-  useEffect(() => {
-    if (!goalBanner) return undefined;
-    const timer = setTimeout(() => {
-      setGoalBanner(null);
-      const store = useLiveMatchStore.getState();
-      if (typeof store.clearLastGoalEvent === 'function') {
-        store.clearLastGoalEvent();
-      }
-    }, CELEBRATION_MS);
-    return () => clearTimeout(timer);
-  }, [goalBanner]);
+  const goalSequence = useLiveMatchStore((s) => s.goalSequence);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2778,7 +3156,13 @@ export default function PitchCanvas2D() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const engine = createEngine();
+    engineRef.current = engine;
+    window.__engine = engine;
+    window.__corner = (team) => startCornerPrelude(engine, team, performance.now());
     let rafId = 0;
+
+    // 이전 마운트에서 끝나지 못한 연출 상태가 타이머를 멈춘 채 남지 않도록 정리
+    useLiveMatchStore.getState().setGoalSequence(null);
 
     const loop = (now) => {
       try {
@@ -2787,7 +3171,6 @@ export default function PitchCanvas2D() {
 
         if (engine.bannerActive && now >= engine.bannerUntil) {
           engine.bannerActive = false;
-          setGoalBanner(null);
         }
 
         if (state.homeTeam && state.awayTeam) {
@@ -2805,13 +3188,24 @@ export default function PitchCanvas2D() {
             state.matchPhase === 'FULL_TIME' ||
             state.matchPhase === 'PRE_MATCH';
 
-          if (!isHalted) {
-            updateBallAndMatchFlow(engine, state, now, setGoalBanner);
-            updatePlayerPositions(engine, state, speed, now);
+          if (engine.sequence) {
+            updateGoalSequence(engine, state, now, setGoalBanner);
+          } else {
+            if (state.goalSequence) state.setGoalSequence(null);
+            if (!isHalted) {
+              updateBallAndMatchFlow(engine, state, now, setGoalBanner);
+              updatePlayerPositions(engine, state, speed, now);
+              if (!engine.sequence && state.status === 'live') recordReplayFrame(engine, now);
+            }
           }
         }
 
-        render(ctx, engine, state, now);
+        if (engine.sequence?.phase === 'REPLAY') {
+          renderReplay(ctx, engine, state);
+        } else {
+          render(ctx, engine, state, now);
+          if (engine.sequence) drawConfetti(ctx, engine.sequence.confetti);
+        }
       } catch (err) {
         console.error('[PitchCanvas2D] loop error:', err);
       }
@@ -2819,8 +3213,16 @@ export default function PitchCanvas2D() {
     };
 
     rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      cancelAnimationFrame(rafId);
+      useLiveMatchStore.getState().setGoalSequence(null);
+    };
   }, []);
+
+  const skipReplay = () => {
+    const seq = engineRef.current?.sequence;
+    if (seq?.phase === 'REPLAY') seq.skip = true;
+  };
 
   return (
     <div className="relative w-full">
@@ -2829,20 +3231,25 @@ export default function PitchCanvas2D() {
         className="w-full rounded-xl border border-slate-700 shadow-2xl"
         style={{ aspectRatio: `${WIDTH} / ${HEIGHT}` }}
       />
-      {goalBanner && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/55 backdrop-blur-sm z-30 pointer-events-none">
-          <div className="bg-slate-900/95 border-2 border-amber-400 rounded-2xl px-10 py-6 text-center shadow-2xl">
-            <div className="text-amber-400 font-black text-4xl tracking-widest mb-2">
+      {goalBanner && goalSequence === 'CELEBRATION' && (
+        <div className="absolute inset-x-0 top-4 z-30 flex justify-center pointer-events-none">
+          <div className="animate-fade-in-up rounded-2xl border-2 border-amber-400 bg-slate-900/90 px-8 py-3 text-center shadow-2xl">
+            <div className="mb-1 text-3xl font-black tracking-widest text-amber-400">
               ⚽ GOAL ({goalBanner.minute}&apos;)
             </div>
-            <div className="text-white font-extrabold text-2xl mb-1">
-              득점: {goalBanner.scorerName}
-            </div>
-            <div className="text-emerald-300 font-semibold text-base">
-              {goalBanner.assistDisplay}
-            </div>
+            <div className="text-xl font-extrabold text-white">득점: {goalBanner.scorerName}</div>
+            <div className="text-sm font-semibold text-emerald-300">{goalBanner.assistDisplay}</div>
           </div>
         </div>
+      )}
+      {goalSequence === 'REPLAY' && (
+        <button
+          type="button"
+          onClick={skipReplay}
+          className="absolute bottom-6 right-4 z-30 rounded-lg border border-sky-400/70 bg-slate-900/90 px-4 py-2 text-sm font-bold text-sky-200 shadow-lg transition hover:bg-slate-800"
+        >
+          ⏭ 다시보기 건너뛰기
+        </button>
       )}
     </div>
   );

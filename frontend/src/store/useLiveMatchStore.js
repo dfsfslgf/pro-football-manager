@@ -740,7 +740,7 @@ function stopTicker() {
 function syncTicker() {
   stopTicker();
   const state = useLiveMatchStore.getState();
-  if (!tickerAttached || state.status !== 'live' || state.isPaused) return;
+  if (!tickerAttached || state.status !== 'live' || state.isPaused || state.goalSequence) return;
   tickTimer = setInterval(() => useLiveMatchStore.getState().advanceMinute(), TICK_BASE_MS / state.playbackSpeed);
 }
 
@@ -774,6 +774,8 @@ const initialState = {
   lastTouchlineShoutMinute: -10,
   finishState: { status: 'idle', message: null, report: null },
   lastGoalEvent: null,
+  // 득점 직후 연출 단계: null | 'CELEBRATION' | 'REPLAY' (진행 중에는 경기 시간이 흐르지 않음)
+  goalSequence: null,
   participatedPlayers: [],
 };
 
@@ -781,6 +783,16 @@ export const useLiveMatchStore = create((set, get) => ({
   ...initialState,
 
   clearLastGoalEvent: () => set({ lastGoalEvent: null }),
+
+  /**
+   * 득점 세레머니/다시보기 단계를 갱신하고 경기 시간 타이머를 그에 맞게 멈추거나 재개함
+   * @param {null|'CELEBRATION'|'REPLAY'} phase
+   */
+  setGoalSequence: (phase) => {
+    if (get().goalSequence === phase) return;
+    set({ goalSequence: phase });
+    syncTicker();
+  },
 
   /**
    * 캔버스에서 변동된 실시간 평점(liveRating)과 추가 체력 소모(currentStamina)를 스토어의 선수 상태에 동기화함
@@ -1221,6 +1233,7 @@ export const useLiveMatchStore = create((set, get) => ({
       stoppageElapsed: 0,
       weather,
       lastGoalMinute: -10,
+      goalSequence: null,
       isPaused: isHalfTimeStart,
       isHalfTimeModalOpen: isHalfTimeStart,
       halfTimeSummary: isHalfTimeStart
@@ -1263,7 +1276,7 @@ export const useLiveMatchStore = create((set, get) => ({
    */
   advanceMinute: () => {
     const state = get();
-    if (state.status !== 'live' || state.isPaused) return;
+    if (state.status !== 'live' || state.isPaused || state.goalSequence) return;
     const phase = state.matchPhase;
     const isExtraTime = phase === 'EXTRA_TIME_1' || phase === 'EXTRA_TIME_2';
     if (phase !== 'FIRST_HALF' && phase !== 'SECOND_HALF' && !isExtraTime) return;
